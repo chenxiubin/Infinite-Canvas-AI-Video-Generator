@@ -166,6 +166,8 @@ def run_mock_generation_for_node(
     product_id: str,
     template_id: str,
     force_status: str | None = None,
+    model_adapter: str = "mock",
+    model_name_override: str | None = None,
 ) -> dict:
     """Run mock generation for a single node. Synchronous, no real model.
 
@@ -210,12 +212,40 @@ def run_mock_generation_for_node(
         retry_of_job_id=retry_of,
     )
 
-    # Simulate generation
-    now = time.time()
+    # Route through model gateway
+    try:
+        from .model_gateway import submit_generation as gateway_submit
+    except ImportError:
+        from model_gateway import submit_generation as gateway_submit
 
-    if final_status == "success":
-        video_url = f"/mock-videos/{node_id}.mp4"
-        cover_url = f"/mock-covers/{node_id}.jpg"
+    gateway_req = {
+        "node_id": node_id, "image_url": bound_asset_url,
+        "prompt": node.get("prompt", ""), "duration_seconds": node.get("duration_seconds", 4),
+        "shot_key": shot_key, "model_adapter": model_adapter,
+        "model_name": model_name_override or ("mock_image_to_video" if model_adapter == "mock" else None),
+    }
+    gateway_result = gateway_submit(gateway_req)
+
+    # Update job with gateway metadata
+    now = time.time()
+    cursor.execute(
+        """UPDATE video_generation_jobs
+        SET adapter_key = ?, provider_name = ?, provider_job_id = ?, provider_status = ?,
+            model_name = ?, model_version = ?, cost_estimate = ?, submitted_at = ?
+        WHERE id = ?""",
+        (gateway_result.get("adapter_key", "mock"), gateway_result.get("provider_name", "mock"),
+         gateway_result.get("provider_job_id", ""), gateway_result.get("status", ""),
+         gateway_result.get("model_name", "mock_image_to_video"), gateway_result.get("model_version", "mock-v1"),
+         gateway_result.get("cost_estimate", 0.0), now, job_id),
+    )
+
+    gw_status = gateway_result.get("status", "success")
+    if force_status:
+        gw_status = force_status
+
+    if gw_status == "success":
+        video_url = gateway_result.get("video_url") or f"/mock-videos/{node_id}.mp4"
+        cover_url = gateway_result.get("cover_url") or f"/mock-covers/{node_id}.jpg"
         duration = node.get("duration_seconds", 4)
         cursor.execute(
             """UPDATE video_instance_nodes
@@ -239,8 +269,8 @@ def run_mock_generation_for_node(
             WHERE id = ?""",
             (video_url, cover_url, duration, now, job_id),
         )
-    else:
-        error_msg = f"Mock generation failed (force_status={force_status})"
+    elif gw_status == "failed":
+        error_msg = gateway_result.get("error_message") or "Generation failed"
         cursor.execute(
             """UPDATE video_instance_nodes
             SET status = 'failed', job_id = ?, error_message = ?,
@@ -260,7 +290,7 @@ def run_mock_generation_for_node(
     return {
         "node_id": node_id,
         "shot_key": shot_key,
-        "status": final_status,
+        "status": gw_status if not force_status else force_status,
         "job_id": job_id,
         "video_url": video_url,
         "cover_url": cover_url,
@@ -276,6 +306,7 @@ def generate_batch_nodes(
     batch_id: str,
     skip_success: bool = True,
     force_node_statuses: dict[str, str] | None = None,
+    model_adapter: str = "mock",
 ) -> dict:
     """Generate all nodes in a video batch.
 
@@ -330,6 +361,7 @@ def generate_batch_nodes(
             product_id=node["product_id"],
             template_id=node["template_id"],
             force_status=force_status,
+            model_adapter=model_adapter,
         )
 
         if result["status"] == "success":

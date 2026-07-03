@@ -61,6 +61,7 @@
 - `docs/prd/19_MVP-3_Sprint6_无限画布可视化生产链路实现记录.md` — MVP-3 Sprint 6 实现记录
 - `docs/prd/20_MVP-3_Sprint7_体验整理与Demo流程实现记录.md` — MVP-3 Sprint 7 实现记录
 - `docs/prd/21_MVP-3_演示版本总说明.md` — MVP-3 演示版本总说明
+- `docs/prd/22_MVP-4_Sprint8_ModelGateway接入基础架构.md` — MVP-4 Sprint 8 实现记录
 
 > MVP-3 演示版已完成。当前远程最新版本 tag：v0.3-mvp-demo（待创建）。
 

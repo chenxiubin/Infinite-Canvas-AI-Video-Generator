@@ -31,6 +31,12 @@ export const ProductionWorkbench: React.FC = () => {
   const [instance, setInstance] = useState<InstanceData | null>(null);
   const [nodes, setNodes] = useState<NodeItem[]>([]);
   const [viewMode, setViewMode] = useState<'form' | 'canvas'>('form');
+  const [modelAdapter, setModelAdapter] = useState('mock');
+  const [adapters, setAdapters] = useState<any[]>([]);
+
+  useEffect(() => {
+    api.listModelAdapters().then(d => setAdapters(d.adapters || [])).catch(() => {});
+  }, []);
 
   const batchIdRef = useRef('');
   const instanceRef = useRef<InstanceData | null>(null);
@@ -231,6 +237,28 @@ export const ProductionWorkbench: React.FC = () => {
       {/* Status summary — always visible */}
       <ProductionStatusSummary productId={productId} checklist={checklist} selTemplateId={selTemplateId}
         batchId={batchId} batchStatus={instance?.status || 'ready'} nodes={nodes} instance={instance} />
+
+      {/* Model settings */}
+      <div data-testid="model-settings-panel" className="bg-[#1e293b] border border-white/10 rounded-lg p-3 mb-4 text-xs">
+        <span className="text-gray-400 mr-3">模型设置</span>
+        <select data-testid="model-adapter-select" value={modelAdapter} onChange={e => setModelAdapter(e.target.value)}
+          className="bg-[#0f172a] border border-white/10 rounded px-2 py-0.5 text-gray-200">
+          {adapters.map(a => (
+            <option key={a.adapter_key} value={a.adapter_key} disabled={!a.configured}>
+              {a.provider_name} ({a.adapter_key}) {a.configured ? '' : '(未配置)'}
+            </option>
+          ))}
+        </select>
+        <span data-testid="model-adapter-status-mock" className="text-green-400 ml-2">mock: ready</span>
+        <span data-testid="selected-model-adapter" className="text-gray-500 ml-3">
+          当前: {modelAdapter}
+        </span>
+        {adapters.filter(a => a.adapter_key === 'external_http' && !a.configured).map(a => (
+          <span key={a.adapter_key} data-testid="model-adapter-status-external_http" className="text-red-400 ml-2">
+            external_http 未配置
+          </span>
+        ))}
+      </div>
 
       {/* Canvas view */}
       {viewMode === 'canvas' && (

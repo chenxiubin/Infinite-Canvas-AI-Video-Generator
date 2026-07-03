@@ -33,6 +33,7 @@ try:
         can_export_instance, run_mock_export,
         reset_instance_delivery_after_node_regenerate,
     )
+    from .model_gateway import list_adapters as list_model_adapters, submit_generation, DEFAULT_ADAPTER
 except ImportError:
     from asset_roles import (
         infer_asset_role, canonicalize_role, CANONICAL_ROLES,
@@ -55,6 +56,7 @@ except ImportError:
         can_export_instance, run_mock_export,
         reset_instance_delivery_after_node_regenerate,
     )
+    from model_gateway import list_adapters as list_model_adapters, submit_generation, DEFAULT_ADAPTER
 
 # Initialize FastAPI App
 app = FastAPI(
@@ -368,6 +370,21 @@ def init_db():
         completed_at REAL
     )
     """)
+
+    # MVP-4 Sprint 8: model gateway columns on video_generation_jobs
+    for col, col_def in [
+        ("adapter_key", "TEXT DEFAULT 'mock'"),
+        ("provider_name", "TEXT DEFAULT 'mock'"),
+        ("provider_job_id", "TEXT DEFAULT ''"),
+        ("provider_status", "TEXT DEFAULT ''"),
+        ("prompt_version", "TEXT DEFAULT ''"),
+        ("submitted_at", "REAL"),
+        ("polled_at", "REAL"),
+    ]:
+        try:
+            cursor.execute(f"ALTER TABLE video_generation_jobs ADD COLUMN {col} {col_def}")
+        except sqlite3.OperationalError:
+            pass
 
     # Ensure MVP-3 Sprint 3 columns on video_instance_nodes (SQLite ALTER TABLE is limited)
     for col, col_def in [
@@ -2273,14 +2290,17 @@ def get_video_node(node_id: str, db: sqlite3.Connection = Depends(get_db)):
 
 class VideoBatchGenerateRequest(BaseModel):
     skip_success: bool = True
-    force_node_statuses: Optional[dict] = None  # {node_id: "failed"} — TESTING=true only
+    force_node_statuses: Optional[dict] = None
+    model_adapter: str = "mock"
 
 class VideoNodeGenerateRequest(BaseModel):
     force: bool = False
-    force_status: Optional[str] = None  # "failed" — TESTING=true only
+    force_status: Optional[str] = None
+    model_adapter: str = "mock"
 
 class VideoNodeRetryRequest(BaseModel):
-    force_status: Optional[str] = None  # TESTING=true only
+    force_status: Optional[str] = None
+    model_adapter: str = "mock"
 
 # --- Batch Generate ---
 
@@ -2288,6 +2308,15 @@ class VideoNodeRetryRequest(BaseModel):
 def generate_video_batch(batch_id: str, req: VideoBatchGenerateRequest, db: sqlite3.Connection = Depends(get_db)):
     if req.force_node_statuses:
         assert_testing_force_allowed("force_node_statuses")
+
+    # Validate model adapter
+    adapters = list_model_adapters()
+    valid_keys = [a["adapter_key"] for a in adapters]
+    if req.model_adapter not in valid_keys:
+        raise HTTPException(status_code=400, detail=f"Unknown model adapter: {req.model_adapter}")
+    adapter_info = next(a for a in adapters if a["adapter_key"] == req.model_adapter)
+    if not adapter_info["configured"]:
+        raise HTTPException(status_code=400, detail=f"Model adapter '{req.model_adapter}' not configured. Missing: {adapter_info['missing_config']}")
 
     cursor = db.cursor()
 
@@ -2329,7 +2358,7 @@ def generate_video_batch(batch_id: str, req: VideoBatchGenerateRequest, db: sqli
     )
     db.commit()
 
-    result = generate_batch_nodes(cursor, batch_id, req.skip_success, req.force_node_statuses)
+    result = generate_batch_nodes(cursor, batch_id, req.skip_success, req.force_node_statuses, model_adapter=req.model_adapter)
     db.commit()
 
     # Build instance summaries
@@ -2376,6 +2405,12 @@ def generate_video_node(node_id: str, req: VideoNodeGenerateRequest, db: sqlite3
     if req.force_status is not None:
         assert_testing_force_allowed("force_status")
 
+    # Validate model adapter
+    adapters = list_model_adapters()
+    valid_keys = [a["adapter_key"] for a in adapters]
+    if req.model_adapter not in valid_keys:
+        raise HTTPException(status_code=400, detail=f"Unknown model adapter: {req.model_adapter}")
+
     cursor = db.cursor()
     cursor.execute("SELECT * FROM video_instance_nodes WHERE id = ?", (node_id,))
     node = cursor.fetchone()
@@ -2407,6 +2442,7 @@ def generate_video_node(node_id: str, req: VideoNodeGenerateRequest, db: sqlite3
         product_id=node["product_id"],
         template_id=node["template_id"],
         force_status=req.force_status,
+        model_adapter=req.model_adapter,
     )
     apply_instance_status(cursor, node["instance_id"])
     apply_batch_status(cursor, node["batch_id"])
@@ -2451,6 +2487,7 @@ def retry_video_node(node_id: str, req: VideoNodeRetryRequest, db: sqlite3.Conne
         product_id=node["product_id"],
         template_id=node["template_id"],
         force_status=req.force_status if req.force_status else "success",
+        model_adapter=req.model_adapter,
     )
     apply_instance_status(cursor, node["instance_id"])
     apply_batch_status(cursor, node["batch_id"])
@@ -2488,6 +2525,10 @@ def get_generation_job(job_id: str, db: sqlite3.Connection = Depends(get_db)):
         "output_video_url": job["output_video_url"],
         "output_cover_url": job["output_cover_url"],
         "error_message": job["error_message"],
+        "adapter_key": job["adapter_key"],
+        "provider_name": job["provider_name"],
+        "provider_job_id": job["provider_job_id"],
+        "provider_status": job["provider_status"],
         "attempt_no": job["attempt_no"],
         "retry_of_job_id": job["retry_of_job_id"],
     }
@@ -2508,6 +2549,9 @@ def list_node_jobs(node_id: str, db: sqlite3.Connection = Depends(get_db)):
         {
             "job_id": r["id"],
             "status": r["status"],
+            "adapter_key": r["adapter_key"],
+            "model_name": r["model_name"],
+            "model_version": r["model_version"],
             "attempt_no": r["attempt_no"],
             "retry_of_job_id": r["retry_of_job_id"],
             "output_video_url": r["output_video_url"],
@@ -2692,6 +2736,25 @@ def get_merge_job(merge_job_id: str, db: sqlite3.Connection = Depends(get_db)):
         "status": job["status"],
         "output_preview_url": job["output_preview_url"],
         "output_cover_url": job["output_cover_url"],
+    }
+
+
+# ==================== MVP-4 Sprint 8: Model Gateway ====================
+
+@app.get("/api/v1/model-gateway/adapters")
+def get_model_adapters():
+    return {"adapters": list_model_adapters()}
+
+
+# --- Frontend model settings ---
+@app.get("/api/v1/model-settings")
+def get_model_settings():
+    adapters = list_model_adapters()
+    default = next((a for a in adapters if a.get("default")), adapters[0] if adapters else None)
+    return {
+        "current_adapter": default["adapter_key"] if default else "mock",
+        "current_model": "mock_image_to_video",
+        "adapters": adapters,
     }
 
 

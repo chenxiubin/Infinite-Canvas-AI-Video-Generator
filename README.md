@@ -64,6 +64,18 @@ npm run test:e2e:mvp3:canvas # 画布 E2E
 npm run test:e2e:mvp3:demo   # Demo E2E
 ```
 
+## Model Gateway
+
+当前默认 mock adapter。external_http adapter 需要环境变量配置：
+
+```
+MODEL_GATEWAY_EXTERNAL_BASE_URL=
+MODEL_GATEWAY_EXTERNAL_API_KEY=
+MODEL_GATEWAY_EXTERNAL_PROVIDER_NAME=custom
+```
+
+未配置时所有生成仍走 mock，不影响演示闭环。
+
 ## 当前限制
 
 - Mock 生成，不接真实模型

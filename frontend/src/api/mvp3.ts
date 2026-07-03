@@ -80,3 +80,9 @@ export const reviewVideoNode = (nodeId: string, action: string, reason?: string)
 
 export const getNodeJobs = (nodeId: string) =>
   request(`/api/v1/video-nodes/${nodeId}/jobs`);
+
+export const listModelAdapters = () =>
+  request('/api/v1/model-gateway/adapters');
+
+export const getModelSettings = () =>
+  request('/api/v1/model-settings');
