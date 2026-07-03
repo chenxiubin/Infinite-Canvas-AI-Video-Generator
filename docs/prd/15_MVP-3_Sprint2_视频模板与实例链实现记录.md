@@ -113,7 +113,25 @@
 | S05_scene | scene | — |
 | S06_brand | brand | — |
 
-## 5. API 列表
+## 5. Video Batch 主表说明
+
+1. Sprint 2 **没有新增 `video_batches` 表**。
+2. 当前复用旧 `batch_tasks` 作为 video batch 主表。
+3. `batch_tasks` 存储：
+   - `id` — batch_id
+   - `status` — ready / running / completed / partially_completed / failed
+   - `total_count` — 产品数量
+   - `completed_count`
+   - `failed_count`
+   - `canvas_id` — 占位值 `"mvp3_auto"`
+4. `template_id` 和 `product_type` 当前不在 `batch_tasks` 行级存储。
+5. `template_id` 存储在 `video_instances.template_id`（per-instance）。
+6. `product_type` 存储在 `video_instances.product_type`（per-instance）。
+7. `GET /api/v1/video-batches/{batch_id}` 通过 `batch_tasks` JOIN `video_instances` 聚合返回完整批次信息。
+8. 当前约束：同一个 video batch 内所有 instances 必须来自同一个 template 和同一个 product_type（创建时校验）。
+9. 后续 Sprint 3 如果需要更强的 batch 级调度，可以评估是否给 `batch_tasks` 增加 nullable 的 `template_id` / `product_type` 字段，Sprint 2 暂不强制。
+
+## 6. API 列表
 
 | Method | Path | 用途 |
 |--------|------|------|
@@ -124,20 +142,20 @@
 | GET | /api/v1/video-instances/{id} | 实例详情（含 nodes） |
 | GET | /api/v1/video-nodes/{id} | 节点详情 |
 
-## 6. 测试用例
+## 7. 测试用例
 
-28 个，位于 `backend/tests/test_video_templates.py`
+29 个，位于 `backend/tests/test_video_templates.py`
 
-全部通过。全部后端 65 条通过。E2E 14 条通过。npm test 通过。
+全部通过。全部后端 66 条通过。E2E 14 条通过。npm test 通过。
 
-## 7. 当前不做
+## 8. 当前不做
 
 - 不调用真实模型
 - 不生成真实视频
 - 不做审核面板
 - 不做复杂 UI
 
-## 8. 已知风险
+## 9. 已知风险
 
 - `build_prompt` 当前模板不含占位符，实际字符串替换为空操作；后续模板升级时需要同步添加 `{product_type}`、`{sku}` 等占位符
 - video_instances 和 MVP-2 instances 是两套独立的表，批量任务统一用 batch_tasks
