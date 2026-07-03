@@ -106,6 +106,23 @@ class TestBatchGenerate(unittest.TestCase):
         self.assertEqual(data["generated_nodes"], 0)
         self.assertGreater(data["skipped_success_nodes"], 0)
 
+    def test_generation_job_status_is_success(self):
+        inst_resp = self.client.get(f"/api/v1/video-batches/{self.batch_id}")
+        iid = inst_resp.json()["instances"][0]["instance_id"]
+        detail = self.client.get(f"/api/v1/video-instances/{iid}")
+        for node in detail.json()["nodes"]:
+            jobs_r = self.client.get(f"/api/v1/video-nodes/{node['node_id']}/jobs")
+            for job in jobs_r.json()["jobs"]:
+                self.assertEqual(job["status"], "success")
+
+    def test_no_running_residue_after_generate(self):
+        inst_resp = self.client.get(f"/api/v1/video-batches/{self.batch_id}")
+        iid = inst_resp.json()["instances"][0]["instance_id"]
+        detail = self.client.get(f"/api/v1/video-instances/{iid}")
+        for node in detail.json()["nodes"]:
+            self.assertNotEqual(node["status"], "running")
+            self.assertNotEqual(node["status"], "pending")
+
 
 class TestNodeGenerate(unittest.TestCase):
     @classmethod
@@ -160,12 +177,17 @@ class TestRetry(unittest.TestCase):
         self.assertEqual(r.json()["status"], "success")
 
     def test_b_retry_attempt_no_from_jobs(self):
-        # Check job history shows attempt_no progression
         r = self.client.get(f"/api/v1/video-nodes/{self.node_id}/jobs")
         jobs = r.json()["jobs"]
-        self.assertGreaterEqual(len(jobs), 2)  # at least 2 jobs (fail + retry)
-        # Last job should have attempt_no >= 2
+        self.assertGreaterEqual(len(jobs), 2)
         self.assertGreaterEqual(jobs[-1]["attempt_no"], 2)
+
+    def test_b2_retry_of_job_id_points_to_previous_failed(self):
+        r = self.client.get(f"/api/v1/video-nodes/{self.node_id}/jobs")
+        jobs = r.json()["jobs"]
+        # First job should be failed, second should have retry_of_job_id pointing to first
+        self.assertEqual(jobs[0]["status"], "failed")
+        self.assertEqual(jobs[1].get("retry_of_job_id"), jobs[0]["job_id"])
 
     def test_c_non_failed_cannot_retry(self):
         r = self.client.post(f"/api/v1/video-nodes/{self.node_id}/retry", json={})
@@ -262,13 +284,49 @@ class TestEdgeCases(unittest.TestCase):
         r = self.client.get("/api/v1/video-nodes/vnode_nonexistent/jobs")
         self.assertEqual(r.status_code, 404)
 
-    def test_archived_batch_blocked(self):
+    def test_archived_batch_blocked_from_generate(self):
+        import sqlite3, os as _os
         batch_id, _ = _create_batch(self.client, prefix="ARC")
-        self.client.patch(f"/api/v1/video-batches/{batch_id}/status", json={"status": "draft"})
-        # Archive via status update
+        # Directly set batch_tasks.status to 'archived' via the underlying DB
+        from main import DB_FILE
+        conn = sqlite3.connect(DB_FILE)
+        conn.execute("UPDATE batch_tasks SET status = 'archived' WHERE id = ?", (batch_id,))
+        conn.commit()
+        conn.close()
         r = self.client.post(f"/api/v1/video-batches/{batch_id}/generate", json={})
-        # Not archived, should succeed
-        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.status_code, 400)
+
+    def test_node_without_bound_asset_blocked(self):
+        import sqlite3
+        batch_id, _ = _create_batch(self.client, prefix="NOBA")
+        # Manually clear bound_asset on a non-brand node
+        from main import DB_FILE
+        conn = sqlite3.connect(DB_FILE)
+        conn.execute(
+            "UPDATE video_instance_nodes SET bound_asset_id = NULL "
+            "WHERE shot_key = 'S01_main' AND batch_id = ?", (batch_id,)
+        )
+        conn.commit()
+        conn.close()
+        r = self.client.post(f"/api/v1/video-batches/{batch_id}/generate", json={})
+        self.assertEqual(r.status_code, 400)
+
+    def test_alter_table_idempotent_on_repeat_init_db(self):
+        """Calling init_db() multiple times must not fail on ALTER TABLE ADD COLUMN."""
+        from main import init_db as _idb
+        try:
+            _idb()
+            _idb()
+        except Exception as e:
+            self.fail(f"init_db() raised {e} on repeat call")
+
+    def test_default_templates_not_duplicated_on_repeat_init_db(self):
+        r = self.client.get("/api/v1/video-templates?product_type=desk_calendar")
+        count_before = len(r.json()["templates"])
+        from main import init_db as _idb
+        _idb()
+        r = self.client.get("/api/v1/video-templates?product_type=desk_calendar")
+        self.assertEqual(len(r.json()["templates"]), count_before)
 
 
 class TestTwoProductBatch(unittest.TestCase):

@@ -291,8 +291,13 @@ def generate_batch_nodes(
         node_id = node["id"]
         current_status = node.get("status", "pending")
 
+        # Check force status first (overrides skip)
+        force_status = None
+        if force_node_statuses:
+            force_status = force_node_statuses.get(node_id)
+
         # Skip success nodes unless forced
-        if current_status == "success" and skip_success:
+        if current_status == "success" and skip_success and not force_status:
             skipped += 1
             node_results.append({
                 "node_id": node_id,
@@ -301,11 +306,6 @@ def generate_batch_nodes(
                 "skipped": True,
             })
             continue
-
-        # Check force
-        force_status = None
-        if force_node_statuses:
-            force_status = force_node_statuses.get(node_id)
 
         # Mark as running
         now = time.time()
