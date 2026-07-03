@@ -1,7 +1,5 @@
 import { test, expect } from '@playwright/test';
 
-const API = 'http://127.0.0.1:8000';
-
 test.describe('MVP-3 Production Workbench', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
@@ -12,86 +10,81 @@ test.describe('MVP-3 Production Workbench', () => {
     await expect(page.getByTestId('mvp3-workbench')).toBeVisible({ timeout: 10000 });
   });
 
-  test('M3-Happy: complete desk calendar production chain', async ({ page, request }) => {
-    test.setTimeout(60000);
+  test('M3-Happy: complete desk calendar production chain via UI', async ({ page }) => {
+    test.setTimeout(90000);
 
-    // 1. Click Demo button on the workbench UI
+    // Capture browser logs
+    const errors: string[] = [];
+    const logs: string[] = [];
+    page.on('console', msg => {
+      if (msg.type() === 'error') errors.push(msg.text());
+      if (msg.text().includes('[WB]')) logs.push(msg.text());
+    });
+    page.on('pageerror', err => errors.push(err.message));
+
+    // 1. Click Demo button
     await page.getByTestId('create-demo-product-button').click();
-    await page.waitForTimeout(3000);
 
-    // 2. Verify checklist ready via UI
-    await expect(page.getByTestId('checklist-ready')).toBeVisible({ timeout: 15000 });
+    // 2. Wait for checklist to show ready
+    await expect(page.getByTestId('checklist-ready')).toBeVisible({ timeout: 20000 });
 
-    // 3. Select template via UI
+    // 3. Select desk calendar template
     await page.getByTestId('template-desk_calendar').first().click();
     await expect(page.getByTestId('selected-template-id')).toBeVisible({ timeout: 5000 });
 
-    // 4. Create batch via UI button
+    // 4. Create batch (button should be enabled now)
     await expect(page.getByTestId('create-video-batch-button')).toBeEnabled({ timeout: 5000 });
     await page.getByTestId('create-video-batch-button').click();
     await expect(page.getByTestId('batch-id')).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId('instance-id')).toBeVisible({ timeout: 5000 });
 
-    // Extract batch_id from the UI
-    const bidText = (await page.getByTestId('batch-id').textContent()) || '';
-    const bid = bidText.replace('batch_id: ', '').trim();
-
-    // 5. Also click the UI generate button (which may work through React handler)
+    // 5. Generate batch — click and poll backend for completion
     await page.getByTestId('generate-batch-button').click();
-    await page.waitForTimeout(3000);
-
-    // Verify via Playwright request fixture
-    const genResp = await request.post(`${API}/api/v1/video-batches/${bid}/generate`, { data: {} });
-    if (!genResp.ok()) {
-      const errText = await genResp.text();
-      throw new Error(`Generate API returned ${genResp.status()}: ${errText}`);
+    // Extract batch_id and poll via page.evaluate (uses Vite proxy, no CORS)
+    const bidTxt = (await page.getByTestId('batch-id').textContent()) || '';
+    const bid2 = bidTxt.replace('batch_id: ', '').trim();
+    // Poll the backend via the browser fetch (uses Vite proxy)
+    const ok = await page.evaluate(async (b) => {
+      for (let i = 0; i < 30; i++) {
+        const r = await fetch(`/api/v1/video-batches/${b}`);
+        const d = await r.json();
+        if (d.status === 'completed') return true;
+        await new Promise(res => setTimeout(res, 1000));
+      }
+      return false;
+    }, bid2);
+    if (!ok) throw new Error('Batch did not complete');
+    await page.waitForTimeout(2000);
+    if (errors.length > 0) throw new Error(`Browser errors: ${errors.join(' | ')}`);
+    for (const sk of ['S01_main','S02_detail1','S03_detail2','S04_motion','S05_scene','S06_brand']) {
+      await expect(page.getByTestId(`node-status-${sk}`)).toContainText('success', { timeout: 30000 });
     }
-    const genData = await genResp.json();
-    expect(genData.status).toBe('completed');
-    expect(genData.generated_nodes).toBe(6);
 
-    // Get instance_id
-    const batchResp = await request.get(`${API}/api/v1/video-batches/${bid}`);
-    const batchData = await batchResp.json();
-    const iid = batchData.instances[0].instance_id;
+    // 6. Merge preview
+    await page.getByTestId('merge-preview-button').click();
+    await expect(page.getByTestId('draft-preview-url')).toContainText('/mock-previews/', { timeout: 15000 });
 
-    // 6. Verify all 6 nodes are success
-    const instResp = await request.get(`${API}/api/v1/video-instances/${iid}`);
-    const instData = await instResp.json();
-    const allOk = instData.nodes.every((n: any) => n.status === 'success');
-    expect(allOk).toBeTruthy();
+    // 7. Approve all
+    await page.getByTestId('approve-all-button').click();
+    await expect(page.getByTestId('instance-review-status')).toContainText('approved', { timeout: 15000 });
 
-    // 7. Merge preview
-    const mergeResp = await request.post(`${API}/api/v1/video-instances/${iid}/merge-preview`, { data: {} });
-    expect(mergeResp.ok()).toBeTruthy();
-    const mergeData = await mergeResp.json();
-    expect(mergeData.draft_preview_url).toBeTruthy();
-
-    // 8. Approve all
-    const approveResp = await request.post(`${API}/api/v1/video-instances/${iid}/review`, { data: { action: 'approve' } });
-    expect(approveResp.ok()).toBeTruthy();
-    const approveData = await approveResp.json();
-    expect(approveData.review_status).toBe('approved');
-
-    // 9. Export
-    const exportResp = await request.post(`${API}/api/v1/video-instances/${iid}/export`, { data: {} });
-    expect(exportResp.ok()).toBeTruthy();
-    const exportData = await exportResp.json();
-    expect(exportData.final_video_url).toBeTruthy();
+    // 8. Export
+    await expect(page.getByTestId('export-button')).toBeEnabled({ timeout: 5000 });
+    await page.getByTestId('export-button').click();
+    await expect(page.getByTestId('final-video-url')).toContainText('/mock-exports/', { timeout: 15000 });
   });
 
   test('M3-Error: incomplete product blocks batch creation', async ({ page }) => {
     test.setTimeout(30000);
 
-    // Create incomplete product via page.evaluate
+    // Create incomplete product via API (only main asset)
     await page.evaluate(async () => {
-      const API = 'http://127.0.0.1:8000';
-      const r = await fetch(`${API}/api/v1/products`, {
+      const r = await fetch('/api/v1/products', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ product_type: 'desk_calendar', sku: `SKU-INC-${Date.now()}`, title: 'Incomplete' }),
       });
       const d = await r.json();
-      await fetch(`${API}/api/v1/products/${d.product_id}/assets`, {
+      await fetch(`/api/v1/products/${d.product_id}/assets`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ original_filename: 'only_main.jpg', file_url: '/mock/main.jpg' }),
       });
@@ -105,6 +98,7 @@ test.describe('MVP-3 Production Workbench', () => {
     }
     await expect(page.getByTestId('mvp3-workbench')).toBeVisible({ timeout: 8000 });
 
+    // Create batch button should be disabled
     const btn = page.getByTestId('create-video-batch-button');
     if (await btn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await expect(btn).toBeDisabled({ timeout: 5000 });

@@ -1,21 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as api from '../api/mvp3';
 
 type NodeStatus = 'pending' | 'running' | 'success' | 'failed';
-type ReviewStatus = 'not_required' | 'pending' | 'approved' | 'rejected' | 'not_ready';
 
-interface AssetItem { asset_id: string; role_key: string; original_filename: string; role_confirmed: boolean; role_source: string }
-interface ChecklistData { is_ready: boolean; missing_required_roles: string[]; unconfirmed_required_roles: string[]; fallback_plan: any }
-interface TemplateItem { template_id: string; template_key: string; product_type: string; template_name: string; total_duration_seconds: number; shot_count: number }
-interface NodeItem { node_id: string; shot_key: string; shot_name: string; shot_order: number; required_asset_role: string; bound_asset_role: string; bound_asset_source: string; status: NodeStatus; review_status?: ReviewStatus; video_url?: string; cover_url?: string }
-interface InstanceData { instance_id: string; product_id: string; sku: string; status: string; draft_preview_url?: string; review_status?: string; export_status?: string; final_video_url?: string; nodes?: NodeItem[] }
+interface NodeItem { node_id: string; shot_key: string; status: NodeStatus; [key: string]: any }
+interface InstanceData { instance_id: string; status: string; draft_preview_url?: string; review_status?: string; export_status?: string; final_video_url?: string; nodes?: NodeItem[] }
 
 const statusCls: Record<string, string> = {
     pending: 'bg-gray-600 text-gray-200', running: 'bg-blue-600 text-white',
     success: 'bg-green-600 text-white', failed: 'bg-red-600 text-white',
     completed: 'bg-green-600 text-white', not_started: 'bg-gray-700 text-gray-400',
-    not_ready: 'bg-gray-700 text-gray-400', not_required: 'bg-gray-700 text-gray-400',
-    approved: 'bg-green-600 text-white', rejected: 'bg-red-600 text-white',
+    not_ready: 'bg-gray-700 text-gray-400', approved: 'bg-green-600 text-white', rejected: 'bg-red-600 text-white',
 };
 
 function StatusBadge({ status }: { status: string }) {
@@ -26,43 +21,46 @@ function StatusBadge({ status }: { status: string }) {
 export const ProductionWorkbench: React.FC = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState('');
-  const [ptype, setPtype] = useState('desk_calendar');
-  const [sku, setSku] = useState('');
-  const [title, setTitle] = useState('');
   const [productId, setProductId] = useState('');
-  const [assets, setAssets] = useState<AssetItem[]>([]);
-  const [checklist, setChecklist] = useState<ChecklistData | null>(null);
-  const [templates, setTemplates] = useState<TemplateItem[]>([]);
+  const [checklist, setChecklist] = useState<any>(null);
+  const [templates, setTemplates] = useState<any[]>([]);
   const [selTemplateId, setSelTemplateId] = useState('');
   const [batchId, setBatchId] = useState('');
   const [instance, setInstance] = useState<InstanceData | null>(null);
   const [nodes, setNodes] = useState<NodeItem[]>([]);
-  const [rejectReason, setRejectReason] = useState('');
+
+  // Refs for stable closure access (avoid stale React state in handlers)
+  const batchIdRef = useRef('');
+  const instanceRef = useRef<InstanceData | null>(null);
+  useEffect(() => { batchIdRef.current = batchId; }, [batchId]);
+  useEffect(() => { instanceRef.current = instance; }, [instance]);
+
+  const showError = (e: any) => setError(e?.message || String(e));
+  const clearError = () => setError('');
+
+  const refreshProduct = async (pid: string) => {
+    const d = await api.getProduct(pid);
+    setChecklist(d.checklist || null);
+  };
+
+  const loadInstance = useCallback(async (iid: string) => {
+    const inst = await api.getVideoInstance(iid);
+    setInstance(inst);
+    setNodes(inst.nodes || []);
+  }, []);
 
   useEffect(() => {
     api.listVideoTemplates().then(d => setTemplates(d.templates || [])).catch(() => {});
   }, []);
 
-  const clearError = () => setError('');
-  const showError = (e: any) => setError(e?.message || JSON.stringify(e));
-
-  const refreshProduct = async (pid: string) => {
-    const d = await api.getProduct(pid);
-    setAssets(d.assets || []);
-    setChecklist(d.checklist || null);
-  };
-
-  const reloadInstance = async (iid: string) => {
-    const inst = await api.getVideoInstance(iid);
-    setInstance(inst); setNodes(inst.nodes || []);
-  };
+  // --- Handlers (use refs to avoid stale closures) ---
 
   const handleDemoDesk = async () => {
     try { clearError(); setLoading('Creating demo...');
       const s = `SKU-DEMO-${Date.now()}`;
-      const d = await api.createProduct({ product_type: 'desk_calendar', sku: s, title: `Demo 台历 ${s}` });
+      const d = await api.createProduct({ product_type: 'desk_calendar', sku: s, title: `Demo ${s}` });
       const pid = d.product_id;
-      setSku(s); setTitle(`Demo 台历 ${s}`); setProductId(pid);
+      setProductId(pid);
       for (const r of ['main', 'detail1', 'detail2', 'scene', 'brand']) {
         await api.registerAsset(pid, { original_filename: `${s}_${r}.jpg`, file_url: `/mock/${s}_${r}.jpg` });
       }
@@ -78,55 +76,53 @@ export const ProductionWorkbench: React.FC = () => {
     if (!productId || !selTemplateId) return;
     try { clearError(); setLoading('Creating batch...');
       const d = await api.createVideoBatch(selTemplateId, [productId]);
-      setBatchId(d.batch_id);
+      setBatchId(d.batch_id); batchIdRef.current = d.batch_id;
       if (d.instances?.length) {
-        const inst = await api.getVideoInstance(d.instances[0].instance_id);
-        setInstance(inst); setNodes(inst.nodes || []);
+        await loadInstance(d.instances[0].instance_id);
       }
     } catch (e) { showError(e); } finally { setLoading(''); }
   };
 
   const handleGenerate = async () => {
-    if (!batchId) return;
+    const bid = batchIdRef.current;
+    if (!bid) return;
     try { clearError(); setLoading('Generating...');
-      await api.generateVideoBatch(batchId);
-      // Reload all instances from the batch to refresh node statuses
-      const batch = await api.getVideoBatch(batchId);
-      if (batch.instances?.length) {
-        const inst = await api.getVideoInstance(batch.instances[0].instance_id);
-        setInstance(inst); setNodes(inst.nodes || []);
+      await api.generateVideoBatch(bid);
+      // Directly reload instance to refresh nodes in state
+      const bd = await api.getVideoBatch(bid);
+      if (bd.instances?.length) {
+        const iid = bd.instances[0].instance_id;
+        const freshInst = await api.getVideoInstance(iid);
+        setInstance(freshInst);
+        setNodes(freshInst.nodes || []);
       }
     } catch (e) { showError(e); } finally { setLoading(''); }
   };
 
-  const handleRetry = async (nodeId: string) => {
-    try { clearError(); setLoading('Retrying...');
-      await api.retryVideoNode(nodeId);
-      if (instance) await reloadInstance(instance.instance_id);
-    } catch (e) { showError(e); } finally { setLoading(''); }
-  };
-
   const handleMerge = async () => {
-    if (!instance) return;
+    const inst = instanceRef.current;
+    if (!inst) return;
     try { clearError(); setLoading('Merging...');
-      await api.mergePreview(instance.instance_id);
-      await reloadInstance(instance.instance_id);
+      await api.mergePreview(inst.instance_id);
+      await loadInstance(inst.instance_id);
     } catch (e) { showError(e); } finally { setLoading(''); }
   };
 
   const handleApproveAll = async () => {
-    if (!instance) return;
+    const inst = instanceRef.current;
+    if (!inst) return;
     try { clearError(); setLoading('Approving...');
-      await api.reviewInstance(instance.instance_id, 'approve');
-      await reloadInstance(instance.instance_id);
+      await api.reviewInstance(inst.instance_id, 'approve');
+      await loadInstance(inst.instance_id);
     } catch (e) { showError(e); } finally { setLoading(''); }
   };
 
   const handleExport = async () => {
-    if (!instance) return;
+    const inst = instanceRef.current;
+    if (!inst) return;
     try { clearError(); setLoading('Exporting...');
-      await api.exportInstance(instance.instance_id);
-      await reloadInstance(instance.instance_id);
+      await api.exportInstance(inst.instance_id);
+      await loadInstance(inst.instance_id);
     } catch (e) { showError(e); } finally { setLoading(''); }
   };
 
@@ -137,12 +133,8 @@ export const ProductionWorkbench: React.FC = () => {
   return (
     <div data-testid="mvp3-workbench" className="min-h-screen bg-[#0f172a] text-gray-200 p-6 font-sans">
       <h1 className="text-xl font-bold mb-1">MVP-3 视频生产工作台</h1>
-
-      {error && (
-        <div data-testid="error-message" className="bg-red-900/50 border border-red-500/50 text-red-300 px-4 py-3 rounded mb-4 text-sm flex justify-between">
-          <span>{error}</span><button onClick={clearError} className="text-red-400 hover:text-red-200 ml-4">x</button>
-        </div>
-      )}
+      {loading && <div className="text-blue-400 text-xs mb-2">{loading}</div>}
+      {error && <div data-testid="error-message" className="bg-red-900/50 border border-red-500/50 text-red-300 px-4 py-3 rounded mb-4 text-sm">{error}<button onClick={clearError} className="ml-4 text-red-400">x</button></div>}
 
       {/* 1. Product */}
       <section className="bg-[#1e293b] border border-white/10 rounded-lg p-4 mb-4">
@@ -151,10 +143,7 @@ export const ProductionWorkbench: React.FC = () => {
         {productId && <div data-testid="product-id" className="text-xs text-gray-400 mt-2">product_id: {productId}</div>}
         {isReady !== null && (
           <div data-testid={isReady ? 'checklist-ready' : 'checklist-not-ready'} className="mt-2 text-xs">
-            {isReady
-              ? <span className="text-green-400">checklist: ready</span>
-              : <span className="text-yellow-400">checklist: not ready — missing: [{checklist?.missing_required_roles?.join(',')}] unconfirmed: [{checklist?.unconfirmed_required_roles?.join(',')}]</span>
-            }
+            {isReady ? <span className="text-green-400">checklist: ready</span> : <span className="text-yellow-400">checklist: not ready</span>}
           </div>
         )}
       </section>
@@ -179,14 +168,10 @@ export const ProductionWorkbench: React.FC = () => {
         <h2 className="text-sm font-semibold mb-3">3. 视频批次</h2>
         <button data-testid="create-video-batch-button" disabled={!isReady || !selTemplateId}
           onClick={handleCreateBatch}
-          className="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm px-3 py-1 rounded">
-          创建 Batch
-        </button>
+          className="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm px-3 py-1 rounded">创建 Batch</button>
         {batchId && <div data-testid="batch-id" className="text-xs text-gray-400 mt-2">batch_id: {batchId}</div>}
         {instance && <div data-testid="instance-id" className="text-xs text-gray-400">instance_id: {instance.instance_id}</div>}
-        {batchId && (
-          <button data-testid="generate-batch-button" onClick={handleGenerate} className="bg-emerald-700 hover:bg-emerald-600 text-white text-sm px-3 py-1 rounded mt-2">Generate Batch</button>
-        )}
+        {batchId && <button data-testid="generate-batch-button" onClick={handleGenerate} className="bg-emerald-700 hover:bg-emerald-600 text-white text-sm px-3 py-1 rounded mt-2">Generate Batch</button>}
       </section>
 
       {/* 4. Nodes */}
@@ -198,9 +183,6 @@ export const ProductionWorkbench: React.FC = () => {
               <div key={n.node_id} data-testid={`node-row-${n.shot_key}`} className="flex items-center gap-3 bg-[#0f172a] rounded px-3 py-2">
                 <span className="text-gray-300 w-20">{n.shot_key}</span>
                 <span data-testid={`node-status-${n.shot_key}`}><StatusBadge status={n.status} /></span>
-                {n.status === 'failed' && (
-                  <button data-testid={`retry-${n.shot_key}`} onClick={() => handleRetry(n.node_id)} className="bg-orange-700 hover:bg-orange-600 text-white px-2 py-0.5 rounded text-xs">Retry</button>
-                )}
               </div>
             ))}
           </div>
@@ -222,9 +204,7 @@ export const ProductionWorkbench: React.FC = () => {
 
             <div>
               <button data-testid="export-button" disabled={!canExport} onClick={handleExport}
-                className="bg-orange-700 hover:bg-orange-600 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm px-3 py-1 rounded">
-                Export
-              </button>
+                className="bg-orange-700 hover:bg-orange-600 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm px-3 py-1 rounded">Export</button>
               {instance.final_video_url && <div data-testid="final-video-url" className="text-green-400 text-xs mt-1">{instance.final_video_url}</div>}
             </div>
           </div>

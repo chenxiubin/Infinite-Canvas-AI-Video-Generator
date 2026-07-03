@@ -1,10 +1,8 @@
 /**
  * MVP-3 API wrappers for the production workbench.
  */
-const BACKEND = 'http://127.0.0.1:8000';
-
 async function request<T = any>(url: string, options?: RequestInit): Promise<T> {
-  const resp = await fetch(`${BACKEND}${url}`, {
+  const resp = await fetch(url, {
     headers: { 'Content-Type': 'application/json' },
     ...options,
   });
