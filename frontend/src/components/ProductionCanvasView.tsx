@@ -29,8 +29,11 @@ const reviewColors: Record<string, string> = {
 };
 
 export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefresh }) => {
-  const [selNode, setSelNode] = useState<NodeItem | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [scale, setScale] = useState(1);
+
+  // Always derive the selected node from the latest nodes prop
+  const selNode = nodes.find(n => n.node_id === selectedNodeId) ?? null;
 
   const noData = !instance || nodes.length === 0;
 
@@ -64,7 +67,7 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
               <React.Fragment key={n.node_id}>
                 <div
                   data-testid={`canvas-node-${n.shot_key}`}
-                  onClick={() => setSelNode(n)}
+                  onClick={() => setSelectedNodeId(n.node_id)}
                   className={`cursor-pointer border-2 rounded-lg p-3 w-40 flex-shrink-0 transition-colors ${statusColors[n.status] || 'border-gray-600 bg-gray-800'} hover:border-white/50`}
                 >
                   <div className="text-xs font-semibold text-gray-200">{n.shot_key}</div>
@@ -92,7 +95,7 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
         <CanvasNodeDetailPanel
           node={selNode}
           instanceId={instance?.instance_id || ''}
-          onClose={() => setSelNode(null)}
+          onClose={() => setSelectedNodeId(null)}
           onRefresh={onRefresh}
         />
       )}

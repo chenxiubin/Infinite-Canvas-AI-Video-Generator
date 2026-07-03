@@ -86,6 +86,41 @@ test.describe('MVP-3 Canvas View', () => {
     }
   });
 
+  test('M3-Canvas: node detail panel operations', async ({ page }) => {
+    test.setTimeout(90000);
+    await setupGeneratedBatch(page);
+    await switchToCanvas(page);
+
+    // Open S04_motion detail panel
+    await page.getByTestId('canvas-node-S04_motion').click();
+    await expect(page.getByTestId('canvas-node-detail-panel')).toBeVisible({ timeout: 8000 });
+
+    const panel = page.getByTestId('canvas-node-detail-panel');
+    await expect(page.getByTestId('canvas-detail-shot-key')).toContainText('S04_motion');
+    await expect(panel).toContainText('bound_asset_role');
+    await expect(panel).toContainText('prompt');
+    await expect(page.getByTestId('canvas-detail-review-status')).toBeVisible();
+
+    // Reject with empty reason must show error
+    await page.getByTestId('canvas-detail-reject-reason').fill('');
+    await page.getByTestId('canvas-detail-reject-button').click();
+    await expect(page.getByTestId('canvas-detail-error-message')).toBeVisible({ timeout: 5000 });
+    await expect(page.getByTestId('canvas-node-review-S04_motion')).not.toContainText('rejected');
+
+    // Approve from detail panel
+    await page.getByTestId('canvas-detail-approve-button').click();
+    await page.waitForTimeout(1500);
+    await expect(page.getByTestId('canvas-node-review-S04_motion')).toContainText('approved', { timeout: 10000 });
+
+    // Reject with reason from detail panel
+    await page.getByTestId('canvas-node-S04_motion').click();
+    await page.waitForTimeout(300);
+    await page.getByTestId('canvas-detail-reject-reason').fill('test quality issue');
+    await page.getByTestId('canvas-detail-reject-button').click();
+    await page.waitForTimeout(1500);
+    await expect(page.getByTestId('canvas-node-review-S04_motion')).toContainText('rejected', { timeout: 10000 });
+  });
+
   test('M3-Canvas: zoom controls', async ({ page }) => {
     test.setTimeout(30000);
     await page.getByTestId('create-demo-product-button').click();
