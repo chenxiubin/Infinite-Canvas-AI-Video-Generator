@@ -74,6 +74,93 @@ test.describe('MVP-3 Canvas View', () => {
     await expect(page.getByTestId('canvas-node-review-S01_main')).toContainText('approved', { timeout: 10000 });
   });
 
+  test('M3-Canvas: node detail panel', async ({ page }) => {
+    test.setTimeout(90000);
+
+    // Setup: Demo + template + batch + generate
+    await page.getByTestId('create-demo-product-button').click();
+    await expect(page.getByTestId('checklist-ready')).toBeVisible({ timeout: 20000 });
+    await page.getByTestId('template-desk_calendar').first().click();
+    await expect(page.getByTestId('create-video-batch-button')).toBeEnabled({ timeout: 5000 });
+    await page.getByTestId('create-video-batch-button').click();
+    await expect(page.getByTestId('batch-id')).toBeVisible({ timeout: 10000 });
+    await page.getByTestId('generate-batch-button').click();
+    const bidTxt = (await page.getByTestId('batch-id').textContent()) || '';
+    const bid = bidTxt.replace('batch_id: ', '').trim();
+    const ok = await page.evaluate(async (b) => {
+      for (let i = 0; i < 30; i++) {
+        const r = await fetch(`/api/v1/video-batches/${b}`);
+        if ((await r.json()).status === 'completed') return true;
+        await new Promise(res => setTimeout(res, 1000));
+      }
+      return false;
+    }, bid);
+    if (!ok) throw new Error('Batch not completed');
+
+    // Switch to canvas
+    await page.getByTestId('workbench-tab-canvas').click();
+    await expect(page.getByTestId('production-canvas-view')).toBeVisible({ timeout: 5000 });
+
+    // Click S04_motion node — wait for React to render detail panel
+    await page.getByTestId('canvas-node-S04_motion').click();
+    await expect(page.getByTestId('canvas-node-detail-panel')).toBeVisible({ timeout: 10000 });
+    await page.waitForTimeout(300);
+
+    // Detail panel assertions
+    await expect(page.getByTestId('canvas-detail-shot-key')).toContainText('S04_motion');
+    // The status may take a moment to appear in the detail panel
+    await expect(page.locator('[data-testid="canvas-detail-status"]')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('canvas-detail-status')).toContainText('success', { timeout: 5000 });
+    await expect(page.getByTestId('canvas-detail-review-status')).toBeVisible();
+    // Verify asset info and prompt are present
+    const panel = page.getByTestId('canvas-node-detail-panel');
+    await expect(panel).toContainText('bound_asset_role');
+    await expect(panel).toContainText('bound_asset_source');
+    await expect(panel).toContainText('prompt');
+
+    // Approve via detail panel
+    await page.getByTestId('canvas-detail-approve-button').click();
+    await page.waitForTimeout(1500);
+    await expect(page.getByTestId('canvas-node-review-S04_motion')).toContainText('approved', { timeout: 10000 });
+
+    // Reject with reason (need to re-open detail panel since data refreshes)
+    await page.getByTestId('canvas-node-S04_motion').click();
+    await page.getByTestId('canvas-detail-reject-reason').fill('test quality issue');
+    await page.getByTestId('canvas-detail-reject-button').click();
+    await page.waitForTimeout(1500);
+    // After reject, review should show rejected
+    await page.getByTestId('canvas-node-S04_motion').click();
+    await expect(page.getByTestId('canvas-detail-review-status')).toContainText('rejected', { timeout: 10000 });
+
+    // Verify no error message
+    const errEl = page.getByTestId('canvas-detail-error-message');
+    expect(await errEl.isVisible().catch(() => false)).toBeFalsy();
+  });
+
+  test('M3-Canvas: zoom controls', async ({ page }) => {
+    test.setTimeout(30000);
+
+    // Setup: Demo + batch so nodes exist
+    await page.getByTestId('create-demo-product-button').click();
+    await expect(page.getByTestId('checklist-ready')).toBeVisible({ timeout: 20000 });
+    await page.getByTestId('template-desk_calendar').first().click();
+    await page.getByTestId('create-video-batch-button').click();
+    await expect(page.getByTestId('batch-id')).toBeVisible({ timeout: 10000 });
+
+    // Switch to canvas
+    await page.getByTestId('workbench-tab-canvas').click();
+    await expect(page.getByTestId('production-canvas-view')).toBeVisible({ timeout: 5000 });
+    await expect(page.getByTestId('canvas-node-S01_main')).toBeVisible({ timeout: 5000 });
+
+    // Zoom controls — just verify they're clickable and view stays
+    await page.getByTestId('canvas-zoom-in').click();
+    await expect(page.getByTestId('canvas-node-S01_main')).toBeVisible({ timeout: 3000 });
+    await page.getByTestId('canvas-zoom-out').click();
+    await expect(page.getByTestId('canvas-node-S01_main')).toBeVisible({ timeout: 3000 });
+    await page.getByTestId('canvas-reset-view').click();
+    await expect(page.getByTestId('canvas-node-S01_main')).toBeVisible({ timeout: 3000 });
+  });
+
   test('M3-Canvas: empty state when no batch', async ({ page }) => {
     test.setTimeout(30000);
     await page.getByTestId('workbench-tab-canvas').click();
