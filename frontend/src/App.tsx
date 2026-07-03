@@ -4,8 +4,9 @@ import { Sidebar } from './components/Sidebar';
 import { Drawer } from './components/Drawer';
 import { BatchDashboard } from './components/BatchDashboard';
 import { useCanvasStore } from './store/canvasStore';
-import { Film, Play, Sparkles, AlertCircle, Download, Check, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Film, Play, Sparkles, AlertCircle, Download, Check, RefreshCw, AlertTriangle, Wrench } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { ProductionWorkbench } from './components/ProductionWorkbench';
 
 // Custom Node Registration
 import { CustomNode } from './components/canvas/CustomNode';
@@ -37,6 +38,7 @@ function App() {
   const [preflightChecked, setPreflightChecked] = useState(false);
   const [templateName, setTemplateName] = useState('');
   const [customTemplates, setCustomTemplates] = useState<{template_id: string, name: string}[]>([]);
+  const [showWorkbench, setShowWorkbench] = useState(false);
 
   const fetchTemplates = async () => {
     const isOffline = useCanvasStore.getState().isOfflineMode;
@@ -158,6 +160,23 @@ function App() {
     setProductLine(e.target.value as 'hanging' | 'desk');
   };
 
+  if (showWorkbench) {
+    return (
+      <div className="app-container">
+        <header className="top-toolbar" style={{ padding: '8px 16px' }}>
+          <h1 className="toolbar-title">
+            <Wrench className="w-5 h-5 text-emerald-400" />
+            <span>MVP-3 视频生产工作台</span>
+          </h1>
+          <button onClick={() => setShowWorkbench(false)} className="secondary-btn text-xs px-3 py-1 rounded">
+            返回画布
+          </button>
+        </header>
+        <ProductionWorkbench />
+      </div>
+    );
+  }
+
   return (
     <div className="app-container">
       {/* Top Toolbar */}
@@ -241,6 +260,16 @@ function App() {
               </span>
             )}
           </div>
+
+          {/* MVP-3 Workbench */}
+          <button
+            onClick={() => setShowWorkbench(true)}
+            className="secondary-btn text-xs px-3 py-1 rounded"
+            title="MVP-3 生产工作台"
+          >
+            <Wrench className="w-4 h-4" />
+            生产工作台
+          </button>
 
           {/* Merge & Compose Button */}
           <button

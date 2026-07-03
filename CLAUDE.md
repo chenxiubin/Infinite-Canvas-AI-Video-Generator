@@ -57,6 +57,7 @@
 - `docs/prd/15_MVP-3_Sprint2_视频模板与实例链实现记录.md` — MVP-3 Sprint 2 实现记录
 - `docs/prd/16_MVP-3_Sprint3_Mock生成与状态流转实现记录.md` — MVP-3 Sprint 3 实现记录
 - `docs/prd/17_MVP-3_Sprint4_草稿合成审核导出前置实现记录.md` — MVP-3 Sprint 4 实现记录
+- `docs/prd/18_MVP-3_Sprint5_前端生产工作台实现记录.md` — MVP-3 Sprint 5 实现记录
 
 （以下文档在当前阶段不再单独维护，MVP-2的实现决策和验证记录以 12_MVP-2_自测脚本.md + 代码本身 + 对话记录为准）
 - `tech_debt_log.md` — 技术债记录（已知技术债已吸收进本节"已知技术债"章节）
