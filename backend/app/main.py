@@ -19,6 +19,13 @@ try:
     from .video_templates import (
         get_asset_for_role, resolve_motion_asset, build_prompt,
     )
+    from .video_generation import (
+        generate_batch_nodes, run_mock_generation_for_node,
+        create_generation_job, get_latest_job_for_node,
+        recompute_instance_status, recompute_batch_status,
+        apply_instance_status, apply_batch_status,
+        assert_testing_force_allowed,
+    )
 except ImportError:
     from asset_roles import (
         infer_asset_role, canonicalize_role, CANONICAL_ROLES,
@@ -26,6 +33,13 @@ except ImportError:
     )
     from video_templates import (
         get_asset_for_role, resolve_motion_asset, build_prompt,
+    )
+    from video_generation import (
+        generate_batch_nodes, run_mock_generation_for_node,
+        create_generation_job, get_latest_job_for_node,
+        recompute_instance_status, recompute_batch_status,
+        apply_instance_status, apply_batch_status,
+        assert_testing_force_allowed,
     )
 
 # Initialize FastAPI App
@@ -311,6 +325,47 @@ def init_db():
         UNIQUE(instance_id, shot_key)
     )
     """)
+
+    # 15. Video Generation Jobs (MVP-3 Sprint 3)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS video_generation_jobs (
+        id TEXT PRIMARY KEY,
+        batch_id TEXT NOT NULL,
+        instance_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        product_id TEXT NOT NULL,
+        template_id TEXT NOT NULL,
+        shot_key TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued', 'running', 'success', 'failed')),
+        model_name TEXT DEFAULT 'mock_image_to_video',
+        model_version TEXT DEFAULT 'mock-v1',
+        prompt TEXT DEFAULT '',
+        input_asset_id TEXT DEFAULT '',
+        input_asset_url TEXT DEFAULT '',
+        output_video_url TEXT,
+        output_cover_url TEXT,
+        duration_seconds INTEGER DEFAULT 0,
+        error_message TEXT,
+        retry_of_job_id TEXT,
+        attempt_no INTEGER DEFAULT 1,
+        cost_estimate REAL DEFAULT 0,
+        created_at REAL NOT NULL,
+        started_at REAL,
+        completed_at REAL
+    )
+    """)
+
+    # Ensure MVP-3 Sprint 3 columns on video_instance_nodes (SQLite ALTER TABLE is limited)
+    for col, col_def in [
+        ("job_id", "TEXT"),
+        ("cover_url", "TEXT"),
+        ("retry_count", "INTEGER DEFAULT 0"),
+        ("completed_at", "REAL"),
+    ]:
+        try:
+            cursor.execute(f"ALTER TABLE video_instance_nodes ADD COLUMN {col} {col_def}")
+        except sqlite3.OperationalError:
+            pass  # column already exists
 
     conn.commit()
 
@@ -2041,6 +2096,10 @@ def get_video_instance(instance_id: str, db: sqlite3.Connection = Depends(get_db
             "bound_asset_source": r["bound_asset_source"],
             "prompt": r["prompt"],
             "status": r["status"],
+            "video_url": r["video_url"],
+            "cover_url": r["cover_url"],
+            "job_id": r["job_id"],
+            "retry_count": r["retry_count"],
         }
         for r in cursor.fetchall()
     ]
@@ -2101,6 +2160,259 @@ def get_video_node(node_id: str, db: sqlite3.Connection = Depends(get_db)):
         "prompt": node["prompt"],
         "status": node["status"],
     }
+
+
+# ==================== MVP-3 Sprint 3: Mock Generation & State Machine ====================
+
+# --- Schemas ---
+
+class VideoBatchGenerateRequest(BaseModel):
+    skip_success: bool = True
+    force_node_statuses: Optional[dict] = None  # {node_id: "failed"} — TESTING=true only
+
+class VideoNodeGenerateRequest(BaseModel):
+    force: bool = False
+    force_status: Optional[str] = None  # "failed" — TESTING=true only
+
+class VideoNodeRetryRequest(BaseModel):
+    force_status: Optional[str] = None  # TESTING=true only
+
+# --- Batch Generate ---
+
+@app.post("/api/v1/video-batches/{batch_id}/generate")
+def generate_video_batch(batch_id: str, req: VideoBatchGenerateRequest, db: sqlite3.Connection = Depends(get_db)):
+    if req.force_node_statuses:
+        assert_testing_force_allowed("force_node_statuses")
+
+    cursor = db.cursor()
+
+    # Validate batch
+    cursor.execute("SELECT * FROM batch_tasks WHERE id = ?", (batch_id,))
+    batch = cursor.fetchone()
+    if not batch:
+        raise HTTPException(status_code=404, detail="Video batch not found")
+    if batch["status"] == "archived":
+        raise HTTPException(status_code=400, detail="Archived batch cannot be generated")
+
+    # Check there are instances
+    cursor.execute("SELECT id FROM video_instances WHERE batch_id = ?", (batch_id,))
+    inst_rows = cursor.fetchall()
+    if not inst_rows:
+        raise HTTPException(status_code=400, detail="Batch has no product instances")
+
+    # Check all nodes have bound assets (excluding brand)
+    cursor.execute(
+        """SELECT vin.id, vin.shot_key FROM video_instance_nodes vin
+        JOIN video_instances vi ON vin.instance_id = vi.id
+        WHERE vi.batch_id = ? AND vin.bound_asset_id IS NULL AND vin.required_asset_role != 'brand'""",
+        (batch_id,),
+    )
+    unbound = cursor.fetchall()
+    # brand can legitimately have no asset if not uploaded; other roles cannot
+    for u in unbound:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Node {u['id']} ({u['shot_key']}) has no bound asset",
+        )
+
+    # Update batch to running
+    cursor.execute("UPDATE batch_tasks SET status = 'running', updated_at = ? WHERE id = ?", (time.time(), batch_id))
+    # Update all pending instances to running
+    cursor.execute(
+        "UPDATE video_instances SET status = 'running', updated_at = ? WHERE batch_id = ? AND status = 'pending'",
+        (time.time(), batch_id),
+    )
+    db.commit()
+
+    result = generate_batch_nodes(cursor, batch_id, req.skip_success, req.force_node_statuses)
+    db.commit()
+
+    # Build instance summaries
+    cursor.execute(
+        "SELECT * FROM video_instances WHERE batch_id = ? ORDER BY created_at",
+        (batch_id,),
+    )
+    instances = []
+    for inst in cursor.fetchall():
+        cursor.execute(
+            "SELECT COUNT(*) as total FROM video_instance_nodes WHERE instance_id = ?",
+            (inst["id"],),
+        )
+        nc = cursor.fetchone()[0]
+        instances.append({
+            "instance_id": inst["id"],
+            "product_id": inst["product_id"],
+            "sku": inst["sku"],
+            "status": inst["status"],
+            "node_count": nc,
+        })
+
+    # Re-read batch counts after generation
+    cursor.execute("SELECT completed_count, failed_count FROM batch_tasks WHERE id = ?", (batch_id,))
+    batch_counts = cursor.fetchone()
+
+    return {
+        "batch_id": batch_id,
+        "status": result["status"],
+        "total_count": batch["total_count"],
+        "completed_count": batch_counts["completed_count"],
+        "failed_count": batch_counts["failed_count"],
+        "generated_nodes": result["generated_nodes"],
+        "skipped_success_nodes": result["skipped_success_nodes"],
+        "failed_nodes": result["failed_nodes"],
+        "instances": instances,
+    }
+
+
+# --- Single Node Generate ---
+
+@app.post("/api/v1/video-nodes/{node_id}/generate")
+def generate_video_node(node_id: str, req: VideoNodeGenerateRequest, db: sqlite3.Connection = Depends(get_db)):
+    if req.force_status is not None:
+        assert_testing_force_allowed("force_status")
+
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM video_instance_nodes WHERE id = ?", (node_id,))
+    node = cursor.fetchone()
+    if not node:
+        raise HTTPException(status_code=404, detail="Video node not found")
+
+    # Check batch not archived
+    cursor.execute("SELECT status FROM batch_tasks WHERE id = ?", (node["batch_id"],))
+    batch = cursor.fetchone()
+    if batch and batch["status"] == "archived":
+        raise HTTPException(status_code=400, detail="Archived batch cannot be generated")
+
+    # Skip success nodes unless forced
+    if node["status"] == "success" and not req.force:
+        return {
+            "node_id": node_id,
+            "status": "success",
+            "skipped": True,
+        }
+
+    if node["status"] != "success" and not req.force:
+        pass  # normal generate
+
+    node_dict = dict(node)
+    result = run_mock_generation_for_node(
+        cursor, node_dict,
+        batch_id=node["batch_id"],
+        instance_id=node["instance_id"],
+        product_id=node["product_id"],
+        template_id=node["template_id"],
+        force_status=req.force_status,
+    )
+    apply_instance_status(cursor, node["instance_id"])
+    apply_batch_status(cursor, node["batch_id"])
+    db.commit()
+
+    return {
+        "node_id": node_id,
+        "status": result["status"],
+        "job_id": result["job_id"],
+        "video_url": result.get("video_url"),
+        "cover_url": result.get("cover_url"),
+        "skipped": result.get("skipped", False),
+    }
+
+
+# --- Node Retry ---
+
+@app.post("/api/v1/video-nodes/{node_id}/retry")
+def retry_video_node(node_id: str, req: VideoNodeRetryRequest, db: sqlite3.Connection = Depends(get_db)):
+    if req.force_status is not None:
+        assert_testing_force_allowed("force_status")
+
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM video_instance_nodes WHERE id = ?", (node_id,))
+    node = cursor.fetchone()
+    if not node:
+        raise HTTPException(status_code=404, detail="Video node not found")
+
+    if node["status"] != "failed":
+        raise HTTPException(status_code=400, detail=f"Only failed nodes can be retried. Current status: {node['status']}")
+
+    cursor.execute("SELECT status FROM batch_tasks WHERE id = ?", (node["batch_id"],))
+    batch = cursor.fetchone()
+    if batch and batch["status"] == "archived":
+        raise HTTPException(status_code=400, detail="Archived batch cannot be retried")
+
+    node_dict = dict(node)
+    result = run_mock_generation_for_node(
+        cursor, node_dict,
+        batch_id=node["batch_id"],
+        instance_id=node["instance_id"],
+        product_id=node["product_id"],
+        template_id=node["template_id"],
+        force_status=req.force_status if req.force_status else "success",
+    )
+    apply_instance_status(cursor, node["instance_id"])
+    apply_batch_status(cursor, node["batch_id"])
+    db.commit()
+
+    return {
+        "node_id": node_id,
+        "status": result["status"],
+        "job_id": result["job_id"],
+        "attempt_no": result["attempt_no"],
+        "video_url": result.get("video_url"),
+        "cover_url": result.get("cover_url"),
+    }
+
+
+# --- Generation Job Queries ---
+
+@app.get("/api/v1/video-generation-jobs/{job_id}")
+def get_generation_job(job_id: str, db: sqlite3.Connection = Depends(get_db)):
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM video_generation_jobs WHERE id = ?", (job_id,))
+    job = cursor.fetchone()
+    if not job:
+        raise HTTPException(status_code=404, detail="Generation job not found")
+
+    return {
+        "job_id": job["id"],
+        "batch_id": job["batch_id"],
+        "instance_id": job["instance_id"],
+        "node_id": job["node_id"],
+        "shot_key": job["shot_key"],
+        "status": job["status"],
+        "model_name": job["model_name"],
+        "model_version": job["model_version"],
+        "output_video_url": job["output_video_url"],
+        "output_cover_url": job["output_cover_url"],
+        "error_message": job["error_message"],
+        "attempt_no": job["attempt_no"],
+        "retry_of_job_id": job["retry_of_job_id"],
+    }
+
+
+@app.get("/api/v1/video-nodes/{node_id}/jobs")
+def list_node_jobs(node_id: str, db: sqlite3.Connection = Depends(get_db)):
+    cursor = db.cursor()
+    cursor.execute("SELECT id FROM video_instance_nodes WHERE id = ?", (node_id,))
+    if not cursor.fetchone():
+        raise HTTPException(status_code=404, detail="Video node not found")
+
+    cursor.execute(
+        "SELECT * FROM video_generation_jobs WHERE node_id = ? ORDER BY attempt_no",
+        (node_id,),
+    )
+    jobs = [
+        {
+            "job_id": r["id"],
+            "status": r["status"],
+            "attempt_no": r["attempt_no"],
+            "retry_of_job_id": r["retry_of_job_id"],
+            "output_video_url": r["output_video_url"],
+            "error_message": r["error_message"],
+            "created_at": r["created_at"],
+            "completed_at": r["completed_at"],
+        }
+        for r in cursor.fetchall()
+    ]
+    return {"node_id": node_id, "jobs": jobs}
 
 
 if __name__ == "__main__":
