@@ -2259,6 +2259,9 @@ def get_video_node(node_id: str, db: sqlite3.Connection = Depends(get_db)):
         "bound_asset_source": node["bound_asset_source"],
         "prompt": node["prompt"],
         "status": node["status"],
+        "review_status": node["review_status"],
+        "video_url": node["video_url"],
+        "cover_url": node["cover_url"],
     }
 
 

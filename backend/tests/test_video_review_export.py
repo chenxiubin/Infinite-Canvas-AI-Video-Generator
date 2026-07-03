@@ -231,6 +231,48 @@ class TestEdgeCases(unittest.TestCase):
         r = self.client.post(f"/api/v1/video-instances/{iid}/merge-preview", json={})
         self.assertEqual(r.status_code, 400)
 
+    def test_archived_batch_blocks_node_review(self):
+        import sqlite3
+        bid, iid, _ = _ready_batch(self.client, prefix="ARCNR")
+        self.client.post(f"/api/v1/video-batches/{bid}/generate", json={})
+        self.client.post(f"/api/v1/video-instances/{iid}/merge-preview", json={})
+        nd = self.client.get(f"/api/v1/video-instances/{iid}").json()["nodes"][0]["node_id"]
+        # Archive the batch
+        from main import DB_FILE
+        conn = sqlite3.connect(DB_FILE)
+        conn.execute("UPDATE batch_tasks SET status='archived' WHERE id=?", (bid,))
+        conn.commit(); conn.close()
+        # Try to review → must be 400
+        r = self.client.post(f"/api/v1/video-nodes/{nd}/review", json={"action":"approve"})
+        self.assertEqual(r.status_code, 400)
+        # Verify node review_status was NOT changed
+        nr = self.client.get(f"/api/v1/video-nodes/{nd}")
+        self.assertNotEqual(nr.json()["review_status"], "approved")
+        # Verify no review_records created for this action
+        rr = self.client.get(f"/api/v1/video-instances/{iid}/reviews").json()["reviews"]
+        archived_reviews = [rv for rv in rr if rv["target_id"] == nd and rv["action"] == "approve"]
+        # filtered by node_id — the merge preview review already set them to pending
+        # No APPROVE records should exist for this node
+        self.assertEqual(len(archived_reviews), 0)
+
+    def test_archived_batch_blocks_instance_review(self):
+        import sqlite3
+        bid, iid, _ = _ready_batch(self.client, prefix="ARCIR")
+        self.client.post(f"/api/v1/video-batches/{bid}/generate", json={})
+        self.client.post(f"/api/v1/video-instances/{iid}/merge-preview", json={})
+        # Archive the batch
+        from main import DB_FILE
+        conn = sqlite3.connect(DB_FILE)
+        conn.execute("UPDATE batch_tasks SET status='archived' WHERE id=?", (bid,))
+        conn.commit(); conn.close()
+        # Try batch review → must be 400
+        r = self.client.post(f"/api/v1/video-instances/{iid}/review", json={"action":"approve"})
+        self.assertEqual(r.status_code, 400)
+        # Verify no nodes were approved
+        detail = self.client.get(f"/api/v1/video-instances/{iid}").json()
+        for node in detail["nodes"]:
+            self.assertNotEqual(node.get("review_status"), "approved")
+
     def test_archived_batch_blocks_export(self):
         import sqlite3
         bid, iid, _ = _ready_batch(self.client, prefix="ARCE")

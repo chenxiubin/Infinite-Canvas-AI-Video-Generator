@@ -145,6 +145,10 @@ def review_node(
     node = cursor.fetchone()
     if not node:
         raise ValueError("Node not found")
+    cursor.execute("SELECT status FROM batch_tasks WHERE id = ?", (node["batch_id"],))
+    batch = cursor.fetchone()
+    if batch and batch["status"] == "archived":
+        raise ValueError("Archived batch cannot be reviewed")
     if node["status"] != "success":
         raise ValueError(f"Cannot review node with status '{node['status']}'")
     if action not in ("approve", "reject"):
@@ -172,6 +176,14 @@ def review_node(
 
 
 def review_instance_nodes(cursor, instance_id: str, action: str, reason: str = "") -> dict:
+    cursor.execute("SELECT batch_id FROM video_instances WHERE id = ?", (instance_id,))
+    inst = cursor.fetchone()
+    if not inst:
+        raise ValueError("Instance not found")
+    cursor.execute("SELECT status FROM batch_tasks WHERE id = ?", (inst["batch_id"],))
+    batch = cursor.fetchone()
+    if batch and batch["status"] == "archived":
+        raise ValueError("Archived batch cannot be reviewed")
     if action not in ("approve", "reject"):
         raise ValueError(f"Invalid action: {action}")
     if action == "reject" and not reason:
