@@ -952,9 +952,13 @@ def generate_segment_node(instance_id: str, node_key: str, bg_tasks: BackgroundT
     bg_tasks.add_task(run_segment_generation_bg, instance_id, node_key, node["id"], node["duration"], force_status)
     return { "status": "queued" }
 
-def run_batch_item_bg(batch_id: str, item_id: str, instance_id: str, nodes: list, force_status: str):
+def run_batch_item_bg(batch_id: str, item_id: str, instance_id: str, nodes: list, node_force_map: dict = None):
     """Generate each node individually (reusing single-node logic), then update batch tracking.
     After all nodes complete, auto-trigger merge via run_merge_bg (which has its own validation).
+
+    node_force_map: dict mapping node_key -> status, e.g. {"S03_detail2": "failed"}.
+    Only matching nodes are forced; others follow normal success/failure logic.
+    If node_force_map contains '__all__', it applies to every node (backward compat).
     """
     import random
     import os
@@ -963,6 +967,7 @@ def run_batch_item_bg(batch_id: str, item_id: str, instance_id: str, nodes: list
     for node in nodes:
         db_node_id = node["id"]
         duration = node.get("duration", 0)
+        node_key = node.get("node_key", "")
 
         # Update node to generating
         conn = sqlite3.connect(DB_FILE, check_same_thread=False)
@@ -974,9 +979,11 @@ def run_batch_item_bg(batch_id: str, item_id: str, instance_id: str, nodes: list
         # Simulate generation time (same 3s as single-node path)
         time.sleep(3)
 
-        # Determine outcome (same logic as run_segment_generation_bg)
-        if force_status:
-            final_node_status = force_status
+        # Determine outcome — per-node force takes priority
+        if node_force_map and '__all__' in node_force_map:
+            final_node_status = node_force_map['__all__']
+        elif node_force_map and node_key in node_force_map:
+            final_node_status = node_force_map[node_key]
         else:
             simulate_failures = os.getenv("SIMULATE_FAILURES", "false").lower() == "true"
             if simulate_failures:
@@ -1072,8 +1079,19 @@ def batch_generate_segments(batch_id: str, req: BatchGenerateRequest, bg_tasks: 
             cursor.execute("SELECT id, node_key, duration FROM instance_nodes WHERE instance_id = ? AND node_type = 'shot'", (instance_id,))
             nodes = cursor.fetchall()
             
-            f_status = req.force_statuses.get(instance_id) if req.force_statuses else None
-            bg_tasks.add_task(run_batch_item_bg, batch_id, item["id"], instance_id, [dict(n) for n in nodes], f_status)
+            # Build per-node force map from compound keys like "ins_id:node_key"
+            node_force_map = {}
+            if req.force_statuses:
+                for key, status in req.force_statuses.items():
+                    if ':' in key:
+                        inst_id, node_key = key.split(':', 1)
+                        if inst_id == instance_id:
+                            node_force_map[node_key] = status
+                    elif key == instance_id:
+                        # Plain instance_id key: apply to ALL nodes (backward compat)
+                        node_force_map = {'__all__': status}
+                        break
+            bg_tasks.add_task(run_batch_item_bg, batch_id, item["id"], instance_id, [dict(n) for n in nodes], node_force_map if node_force_map else None)
             
     # Check if all were failed synchronously
     cursor.execute("SELECT total_count, completed_count, failed_count FROM batch_tasks WHERE id = ?", (batch_id,))

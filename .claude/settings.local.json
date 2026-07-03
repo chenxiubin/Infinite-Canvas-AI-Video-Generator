@@ -22,7 +22,19 @@
       "Bash(ls frontend/.gitignore)",
       "Bash(python -c \"import sys,json; repos=json.load\\(sys.stdin\\); [print\\(f'{r[\\\\\"name\\\\\"]:40s} {r[\\\\\"private\\\\\"]} {r[\\\\\"html_url\\\\\"]}'\\) for r in repos]\")",
       "Bash(git init *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "mcp__plugin_github_github__create_repository",
+      "Bash(git remote *)",
+      "Bash(git commit -m 'MVP-2: 批量生产能力 + 安全校验修复 *)",
+      "Bash(git branch *)",
+      "Bash(git push *)",
+      "Bash(git config *)",
+      "Bash(gh auth *)",
+      "Bash(gh repo *)",
+      "Bash(TESTING=true python -m uvicorn app.main:app --host 127.0.0.1 --port 8000)",
+      "Bash(NO_PROXY=\"127.0.0.1,localhost\" no_proxy=\"127.0.0.1,localhost\" npx playwright test --grep \"G1|G2|H1|H2|H3|I1|I2|I3|I4|J1|J3|J4|K1|K2\" --reporter=list)",
+      "Bash(python -m pytest tests/test_security.py -v)",
+      "Bash(python -m unittest discover -s tests -v)"
     ]
   }
 }
