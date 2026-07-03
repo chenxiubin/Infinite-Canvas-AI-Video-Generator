@@ -16,10 +16,16 @@ try:
         infer_asset_role, canonicalize_role, CANONICAL_ROLES,
         compute_checklist, compute_product_status,
     )
+    from .video_templates import (
+        get_asset_for_role, resolve_motion_asset, build_prompt,
+    )
 except ImportError:
     from asset_roles import (
         infer_asset_role, canonicalize_role, CANONICAL_ROLES,
         compute_checklist, compute_product_status,
+    )
+    from video_templates import (
+        get_asset_for_role, resolve_motion_asset, build_prompt,
     )
 
 # Initialize FastAPI App
@@ -225,6 +231,96 @@ def init_db():
         FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
     )
     """)
+
+    # 11. Video Templates (MVP-3 Sprint 2)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS video_templates (
+        id TEXT PRIMARY KEY,
+        template_key TEXT NOT NULL UNIQUE,
+        product_type TEXT NOT NULL CHECK(product_type IN ('desk_calendar', 'wall_calendar')),
+        template_name TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        total_duration_seconds INTEGER DEFAULT 26,
+        status TEXT DEFAULT 'active' CHECK(status IN ('active', 'archived')),
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL
+    )
+    """)
+
+    # 12. Template Shots (MVP-3 Sprint 2)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS template_shots (
+        id TEXT PRIMARY KEY,
+        template_id TEXT NOT NULL,
+        shot_key TEXT NOT NULL,
+        shot_name TEXT NOT NULL,
+        shot_order INTEGER NOT NULL CHECK(shot_order BETWEEN 1 AND 6),
+        duration_seconds INTEGER NOT NULL,
+        required_asset_role TEXT NOT NULL,
+        prompt_template TEXT NOT NULL DEFAULT '',
+        is_required INTEGER DEFAULT 1,
+        requires_review INTEGER DEFAULT 0,
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL,
+        FOREIGN KEY (template_id) REFERENCES video_templates(id) ON DELETE CASCADE,
+        UNIQUE(template_id, shot_key)
+    )
+    """)
+
+    # 13. Video Instances (MVP-3 Sprint 2)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS video_instances (
+        id TEXT PRIMARY KEY,
+        batch_id TEXT NOT NULL,
+        product_id TEXT NOT NULL,
+        template_id TEXT NOT NULL,
+        product_type TEXT NOT NULL,
+        sku TEXT NOT NULL,
+        status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'running', 'completed', 'failed')),
+        merged_video_url TEXT,
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL,
+        FOREIGN KEY (product_id) REFERENCES products(id)
+    )
+    """)
+
+    # 14. Video Instance Nodes (MVP-3 Sprint 2)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS video_instance_nodes (
+        id TEXT PRIMARY KEY,
+        instance_id TEXT NOT NULL,
+        batch_id TEXT NOT NULL,
+        product_id TEXT NOT NULL,
+        template_id TEXT NOT NULL,
+        shot_key TEXT NOT NULL,
+        shot_name TEXT NOT NULL,
+        shot_order INTEGER NOT NULL,
+        duration_seconds INTEGER NOT NULL DEFAULT 4,
+        required_asset_role TEXT NOT NULL,
+        bound_asset_id TEXT,
+        bound_asset_role TEXT,
+        bound_asset_source TEXT,
+        prompt TEXT NOT NULL DEFAULT '',
+        status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'running', 'success', 'failed')),
+        video_url TEXT,
+        error_message TEXT,
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL,
+        FOREIGN KEY (instance_id) REFERENCES video_instances(id) ON DELETE CASCADE,
+        FOREIGN KEY (product_id) REFERENCES products(id),
+        UNIQUE(instance_id, shot_key)
+    )
+    """)
+
+    conn.commit()
+
+    # Seed default video templates (MVP-3 Sprint 2)
+    try:
+        from .video_templates import ensure_default_video_templates
+    except ImportError:
+        from video_templates import ensure_default_video_templates
+    ensure_default_video_templates(cursor)
+    conn.commit()
 
     conn.commit()
 
@@ -1626,6 +1722,384 @@ def get_product_checklist(product_id: str, db: sqlite3.Connection = Depends(get_
         "product_id": product["id"],
         "product_type": product["product_type"],
         **checklist,
+    }
+
+
+# ==================== MVP-3 Sprint 2: Video Templates & Instance Chains ====================
+
+# --- Schemas ---
+
+class VideoBatchCreateRequest(BaseModel):
+    template_id: str
+    product_ids: List[str]
+
+# --- Video Templates ---
+
+@app.get("/api/v1/video-templates")
+def list_video_templates(
+    product_type: Optional[str] = None,
+    status: str = "active",
+    db: sqlite3.Connection = Depends(get_db),
+):
+    cursor = db.cursor()
+    query = "SELECT * FROM video_templates WHERE status = ?"
+    params = [status]
+    if product_type:
+        query += " AND product_type = ?"
+        params.append(product_type)
+    query += " ORDER BY created_at"
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    templates = []
+    for r in rows:
+        cursor.execute("SELECT COUNT(*) FROM template_shots WHERE template_id = ?", (r["id"],))
+        shot_count = cursor.fetchone()[0]
+        templates.append({
+            "template_id": r["id"],
+            "template_key": r["template_key"],
+            "product_type": r["product_type"],
+            "template_name": r["template_name"],
+            "description": r["description"],
+            "total_duration_seconds": r["total_duration_seconds"],
+            "shot_count": shot_count,
+            "status": r["status"],
+        })
+    return {"templates": templates}
+
+
+@app.get("/api/v1/video-templates/{template_id}")
+def get_video_template(template_id: str, db: sqlite3.Connection = Depends(get_db)):
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM video_templates WHERE id = ?", (template_id,))
+    tpl = cursor.fetchone()
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Video template not found")
+    cursor.execute(
+        "SELECT * FROM template_shots WHERE template_id = ? ORDER BY shot_order",
+        (template_id,),
+    )
+    shots = [
+        {
+            "shot_id": r["id"],
+            "shot_key": r["shot_key"],
+            "shot_name": r["shot_name"],
+            "shot_order": r["shot_order"],
+            "duration_seconds": r["duration_seconds"],
+            "required_asset_role": r["required_asset_role"],
+            "prompt_template": r["prompt_template"],
+            "is_required": bool(r["is_required"]),
+            "requires_review": bool(r["requires_review"]),
+        }
+        for r in cursor.fetchall()
+    ]
+    return {
+        "template_id": tpl["id"],
+        "template_key": tpl["template_key"],
+        "product_type": tpl["product_type"],
+        "template_name": tpl["template_name"],
+        "description": tpl["description"],
+        "total_duration_seconds": tpl["total_duration_seconds"],
+        "status": tpl["status"],
+        "shots": shots,
+    }
+
+
+# --- Video Batches ---
+
+@app.post("/api/v1/video-batches")
+def create_video_batch(req: VideoBatchCreateRequest, db: sqlite3.Connection = Depends(get_db)):
+    cursor = db.cursor()
+
+    # 1. Validate template
+    cursor.execute("SELECT * FROM video_templates WHERE id = ? AND status = 'active'", (req.template_id,))
+    tpl = cursor.fetchone()
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Video template not found or inactive")
+
+    # 2. Validate product_ids
+    if not req.product_ids:
+        raise HTTPException(status_code=400, detail="product_ids is required and must not be empty")
+    if len(req.product_ids) != len(set(req.product_ids)):
+        raise HTTPException(status_code=400, detail="product_ids contains duplicates")
+
+    cursor.execute(
+        "SELECT * FROM template_shots WHERE template_id = ? ORDER BY shot_order",
+        (req.template_id,),
+    )
+    tpl_shots = cursor.fetchall()
+    if len(tpl_shots) != 6:
+        raise HTTPException(status_code=500, detail=f"Template has {len(tpl_shots)} shots, expected 6")
+
+    # 3. Validate each product
+    instances_data = []
+    for pid in req.product_ids:
+        cursor.execute("SELECT * FROM products WHERE id = ?", (pid,))
+        product = cursor.fetchone()
+        if not product:
+            raise HTTPException(status_code=404, detail=f"Product not found: {pid}")
+        if product["product_type"] != tpl["product_type"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Product {pid} type '{product['product_type']}' does not match template type '{tpl['product_type']}'",
+            )
+
+        # Build checklist
+        cursor.execute("SELECT * FROM product_assets WHERE product_id = ?", (pid,))
+        assets = cursor.fetchall()
+        assets_by_role: dict[str, list] = {}
+        role_confirmed_map: dict[str, bool] = {}
+        for a in assets:
+            rk = a["role_key"]
+            assets_by_role.setdefault(rk, []).append(dict(a))
+        for rk, alist in assets_by_role.items():
+            role_confirmed_map[rk] = all(a["role_confirmed"] for a in alist)
+
+        chk = compute_checklist(assets_by_role, role_confirmed_map)
+        if not chk["is_ready"]:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": f"Product {pid} is not ready",
+                    "missing_required_roles": chk["missing_required_roles"],
+                    "unconfirmed_required_roles": chk["unconfirmed_required_roles"],
+                },
+            )
+
+        instances_data.append({
+            "product": product,
+            "assets_by_role": assets_by_role,
+            "role_confirmed_map": role_confirmed_map,
+        })
+
+    # 4. Create batch
+    batch_id = f"batch_{uuid.uuid4().hex[:8]}"
+    now = time.time()
+    cursor.execute(
+        """INSERT INTO batch_tasks
+        (id, canvas_id, status, total_count, completed_count, failed_count, created_at, updated_at)
+        VALUES (?, ?, 'ready', ?, 0, 0, ?, ?)""",
+        (batch_id, "mvp3_auto", len(req.product_ids), now, now),
+    )
+    db.commit()
+
+    # 5. Create instances and nodes
+    result_instances = []
+    for data in instances_data:
+        product = data["product"]
+        instance_id = f"ins_{uuid.uuid4().hex[:8]}"
+        cursor.execute(
+            """INSERT INTO video_instances
+            (id, batch_id, product_id, template_id, product_type, sku, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)""",
+            (instance_id, batch_id, product["id"], req.template_id,
+             product["product_type"], product["sku"], now, now),
+        )
+        db.commit()
+
+        node_list = []
+        for shot in tpl_shots:
+            node_id = f"vnode_{uuid.uuid4().hex[:8]}"
+            asset_role = shot["required_asset_role"]
+            bound_asset_id = None
+            bound_asset_role = None
+            bound_asset_source = None
+
+            if asset_role == "motion":
+                mot_asset, mot_source = resolve_motion_asset(product["id"], cursor)
+                if mot_asset:
+                    bound_asset_id = mot_asset["id"]
+                    bound_asset_role = mot_asset["role_key"]
+                    bound_asset_source = mot_source
+            else:
+                asset = get_asset_for_role(product["id"], asset_role, cursor)
+                if asset:
+                    bound_asset_id = asset["id"]
+                    bound_asset_role = asset["role_key"]
+                    bound_asset_source = "direct"
+
+            prompt = build_prompt(
+                shot["prompt_template"],
+                product["product_type"],
+                product["sku"],
+                shot["shot_key"],
+            )
+
+            cursor.execute(
+                """INSERT INTO video_instance_nodes
+                (id, instance_id, batch_id, product_id, template_id,
+                 shot_key, shot_name, shot_order, duration_seconds,
+                 required_asset_role, bound_asset_id, bound_asset_role,
+                 bound_asset_source, prompt, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)""",
+                (node_id, instance_id, batch_id, product["id"], req.template_id,
+                 shot["shot_key"], shot["shot_name"], shot["shot_order"],
+                 shot["duration_seconds"], asset_role,
+                 bound_asset_id, bound_asset_role, bound_asset_source,
+                 prompt, now, now),
+            )
+            node_list.append({
+                "node_id": node_id,
+                "shot_key": shot["shot_key"],
+                "bound_asset_role": bound_asset_role,
+                "bound_asset_source": bound_asset_source,
+                "status": "pending",
+            })
+
+        result_instances.append({
+            "instance_id": instance_id,
+            "product_id": product["id"],
+            "sku": product["sku"],
+            "node_count": len(node_list),
+            "status": "pending",
+            "nodes": node_list,
+        })
+
+    # Update batch_tasks with total
+    cursor.execute(
+        "UPDATE batch_tasks SET total_count = ?, updated_at = ? WHERE id = ?",
+        (len(result_instances), time.time(), batch_id),
+    )
+    db.commit()
+
+    return {
+        "batch_id": batch_id,
+        "template_id": req.template_id,
+        "product_type": tpl["product_type"],
+        "status": "ready",
+        "total_count": len(result_instances),
+        "instances": result_instances,
+    }
+
+
+@app.get("/api/v1/video-batches/{batch_id}")
+def get_video_batch(batch_id: str, db: sqlite3.Connection = Depends(get_db)):
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM batch_tasks WHERE id = ?", (batch_id,))
+    batch = cursor.fetchone()
+    if not batch:
+        raise HTTPException(status_code=404, detail="Video batch not found")
+
+    cursor.execute(
+        "SELECT * FROM video_instances WHERE batch_id = ? ORDER BY created_at",
+        (batch_id,),
+    )
+    instances = []
+    for inst in cursor.fetchall():
+        cursor.execute(
+            "SELECT COUNT(*) as total FROM video_instance_nodes WHERE instance_id = ?",
+            (inst["id"],),
+        )
+        node_count = cursor.fetchone()[0]
+        cursor.execute(
+            "SELECT status, COUNT(*) as cnt FROM video_instance_nodes WHERE instance_id = ? GROUP BY status",
+            (inst["id"],),
+        )
+        status_counts = {r["status"]: r["cnt"] for r in cursor.fetchall()}
+        instances.append({
+            "instance_id": inst["id"],
+            "product_id": inst["product_id"],
+            "sku": inst["sku"],
+            "status": inst["status"],
+            "node_count": node_count,
+            "node_status_counts": status_counts,
+        })
+
+    return {
+        "batch_id": batch["id"],
+        "status": batch["status"],
+        "total_count": batch["total_count"],
+        "completed_count": batch["completed_count"],
+        "failed_count": batch["failed_count"],
+        "instances": instances,
+    }
+
+
+# --- Video Instances ---
+
+@app.get("/api/v1/video-instances/{instance_id}")
+def get_video_instance(instance_id: str, db: sqlite3.Connection = Depends(get_db)):
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM video_instances WHERE id = ?", (instance_id,))
+    inst = cursor.fetchone()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Video instance not found")
+
+    cursor.execute(
+        "SELECT * FROM video_instance_nodes WHERE instance_id = ? ORDER BY shot_order",
+        (instance_id,),
+    )
+    nodes = [
+        {
+            "node_id": r["id"],
+            "shot_key": r["shot_key"],
+            "shot_name": r["shot_name"],
+            "shot_order": r["shot_order"],
+            "duration_seconds": r["duration_seconds"],
+            "required_asset_role": r["required_asset_role"],
+            "bound_asset_id": r["bound_asset_id"],
+            "bound_asset_role": r["bound_asset_role"],
+            "bound_asset_source": r["bound_asset_source"],
+            "prompt": r["prompt"],
+            "status": r["status"],
+        }
+        for r in cursor.fetchall()
+    ]
+
+    cursor.execute("SELECT * FROM products WHERE id = ?", (inst["product_id"],))
+    product = cursor.fetchone()
+
+    return {
+        "instance_id": inst["id"],
+        "batch_id": inst["batch_id"],
+        "product_id": inst["product_id"],
+        "product_type": inst["product_type"],
+        "sku": inst["sku"],
+        "template_id": inst["template_id"],
+        "status": inst["status"],
+        "product": {
+            "product_id": product["id"],
+            "sku": product["sku"],
+            "title": product["title"],
+        } if product else None,
+        "nodes": nodes,
+    }
+
+
+# --- Video Instance Nodes ---
+
+@app.get("/api/v1/video-nodes/{node_id}")
+def get_video_node(node_id: str, db: sqlite3.Connection = Depends(get_db)):
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM video_instance_nodes WHERE id = ?", (node_id,))
+    node = cursor.fetchone()
+    if not node:
+        raise HTTPException(status_code=404, detail="Video node not found")
+
+    bound_asset = None
+    if node["bound_asset_id"]:
+        cursor.execute("SELECT * FROM product_assets WHERE id = ?", (node["bound_asset_id"],))
+        ba = cursor.fetchone()
+        if ba:
+            bound_asset = {
+                "asset_id": ba["id"],
+                "role_key": ba["role_key"],
+                "original_filename": ba["original_filename"],
+                "file_url": ba["file_url"],
+            }
+
+    return {
+        "node_id": node["id"],
+        "instance_id": node["instance_id"],
+        "batch_id": node["batch_id"],
+        "shot_key": node["shot_key"],
+        "shot_name": node["shot_name"],
+        "shot_order": node["shot_order"],
+        "duration_seconds": node["duration_seconds"],
+        "required_asset_role": node["required_asset_role"],
+        "bound_asset": bound_asset,
+        "bound_asset_source": node["bound_asset_source"],
+        "prompt": node["prompt"],
+        "status": node["status"],
     }
 
 
