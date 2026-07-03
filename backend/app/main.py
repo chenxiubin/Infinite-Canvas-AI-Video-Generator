@@ -10,6 +10,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+# MVP-3: asset role helpers
+try:
+    from .asset_roles import (
+        infer_asset_role, canonicalize_role, CANONICAL_ROLES,
+        compute_checklist, compute_product_status,
+    )
+except ImportError:
+    from asset_roles import (
+        infer_asset_role, canonicalize_role, CANONICAL_ROLES,
+        compute_checklist, compute_product_status,
+    )
+
 # Initialize FastAPI App
 app = FastAPI(
     title="Infinite Canvas Video Generator Mock Backend",
@@ -163,9 +175,46 @@ def init_db():
         FOREIGN KEY (instance_id) REFERENCES instances (id) ON DELETE CASCADE
     )
     """)
-    
+
+    # 9. Products (MVP-3)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS products (
+        id TEXT PRIMARY KEY,
+        product_type TEXT NOT NULL CHECK(product_type IN ('desk_calendar', 'wall_calendar')),
+        sku TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        status TEXT DEFAULT 'draft' CHECK(status IN ('draft', 'incomplete', 'asset_ready', 'archived')),
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL,
+        UNIQUE(sku)
+    )
+    """)
+
+    # 10. Product Assets (MVP-3)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS product_assets (
+        id TEXT PRIMARY KEY,
+        product_id TEXT NOT NULL,
+        role_key TEXT NOT NULL,
+        original_filename TEXT NOT NULL,
+        file_url TEXT NOT NULL,
+        mime_type TEXT DEFAULT '',
+        file_size INTEGER DEFAULT 0,
+        width INTEGER DEFAULT 0,
+        height INTEGER DEFAULT 0,
+        role_confidence REAL DEFAULT 0.0,
+        role_source TEXT DEFAULT 'auto' CHECK(role_source IN ('auto', 'manual')),
+        role_confirmed INTEGER DEFAULT 0,
+        fallback_source TEXT DEFAULT NULL,
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL,
+        FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+    )
+    """)
+
     conn.commit()
-    
+
     # Seed default templates if empty
     cursor.execute("SELECT COUNT(*) FROM templates")
     if cursor.fetchone()[0] == 0:
@@ -1277,6 +1326,295 @@ def upload_asset_file(file: UploadFile = File(...), db: sqlite3.Connection = Dep
         "url": url,
         "role_key": role_key
     }
+
+# ==================== MVP-3: Product Asset Package APIs ====================
+
+# --- Schemas ---
+
+class ProductCreateRequest(BaseModel):
+    product_type: str  # 'desk_calendar' | 'wall_calendar'
+    sku: str
+    title: str
+    description: str = ""
+
+class ProductAssetRegisterRequest(BaseModel):
+    original_filename: str
+    file_url: str
+    mime_type: str = "image/jpeg"
+    file_size: int = 0
+    width: int = 0
+    height: int = 0
+
+class AssetRoleUpdateRequest(BaseModel):
+    role_key: str
+
+class ProductStatusUpdateRequest(BaseModel):
+    status: str  # 'draft' | 'incomplete' | 'asset_ready' | 'archived'
+
+# --- Product CRUD ---
+
+@app.post("/api/v1/products")
+def create_product(req: ProductCreateRequest, db: sqlite3.Connection = Depends(get_db)):
+    if req.product_type not in ("desk_calendar", "wall_calendar"):
+        raise HTTPException(status_code=400, detail=f"Invalid product_type: {req.product_type}. Must be desk_calendar or wall_calendar.")
+    if not req.sku or not req.sku.strip():
+        raise HTTPException(status_code=400, detail="sku is required")
+
+    cursor = db.cursor()
+    # Check duplicate SKU
+    cursor.execute("SELECT id FROM products WHERE sku = ?", (req.sku.strip(),))
+    if cursor.fetchone():
+        raise HTTPException(status_code=409, detail=f"Product with SKU '{req.sku}' already exists")
+
+    product_id = f"prod_{uuid.uuid4().hex[:8]}"
+    now = time.time()
+    cursor.execute(
+        "INSERT INTO products (id, product_type, sku, title, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (product_id, req.product_type, req.sku.strip(), req.title, req.description, "draft", now, now),
+    )
+    db.commit()
+    return {
+        "product_id": product_id,
+        "product_type": req.product_type,
+        "sku": req.sku.strip(),
+        "title": req.title,
+        "description": req.description,
+        "status": "draft",
+    }
+
+
+@app.get("/api/v1/products")
+def list_products(
+    product_type: Optional[str] = None,
+    status: Optional[str] = None,
+    db: sqlite3.Connection = Depends(get_db),
+):
+    cursor = db.cursor()
+    query = "SELECT id, product_type, sku, title, status, created_at, updated_at FROM products WHERE 1=1"
+    params = []
+    if product_type:
+        query += " AND product_type = ?"
+        params.append(product_type)
+    if status:
+        query += " AND status = ?"
+        params.append(status)
+    query += " ORDER BY created_at DESC"
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    return [
+        {
+            "product_id": r["id"],
+            "product_type": r["product_type"],
+            "sku": r["sku"],
+            "title": r["title"],
+            "status": r["status"],
+            "created_at": r["created_at"],
+        }
+        for r in rows
+    ]
+
+
+@app.get("/api/v1/products/{product_id}")
+def get_product(product_id: str, db: sqlite3.Connection = Depends(get_db)):
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM products WHERE id = ?", (product_id,))
+    product = cursor.fetchone()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    # Collect assets by role
+    cursor.execute("SELECT * FROM product_assets WHERE product_id = ? ORDER BY created_at", (product_id,))
+    asset_rows = cursor.fetchall()
+    assets = [
+        {
+            "asset_id": r["id"],
+            "product_id": r["product_id"],
+            "role_key": r["role_key"],
+            "original_filename": r["original_filename"],
+            "file_url": r["file_url"],
+            "mime_type": r["mime_type"],
+            "file_size": r["file_size"],
+            "width": r["width"],
+            "height": r["height"],
+            "role_confidence": r["role_confidence"],
+            "role_source": r["role_source"],
+            "role_confirmed": bool(r["role_confirmed"]),
+            "fallback_source": r["fallback_source"],
+        }
+        for r in asset_rows
+    ]
+
+    # Build role-wise maps for checklist
+    assets_by_role: dict[str, list[dict]] = {}
+    role_confirmed_map: dict[str, bool] = {}
+    for a in assets:
+        rk = a["role_key"]
+        assets_by_role.setdefault(rk, []).append(a)
+    for rk, alist in assets_by_role.items():
+        role_confirmed_map[rk] = all(a["role_confirmed"] for a in alist)
+
+    checklist = compute_checklist(assets_by_role, role_confirmed_map)
+    # Recompute product status
+    new_status = compute_product_status(assets_by_role, role_confirmed_map)
+    if new_status != product["status"]:
+        cursor.execute("UPDATE products SET status = ?, updated_at = ? WHERE id = ?", (new_status, time.time(), product_id))
+        db.commit()
+
+    return {
+        "product_id": product["id"],
+        "product_type": product["product_type"],
+        "sku": product["sku"],
+        "title": product["title"],
+        "description": product["description"],
+        "status": new_status,
+        "assets": assets,
+        "checklist": checklist,
+    }
+
+
+@app.patch("/api/v1/products/{product_id}/status")
+def update_product_status(product_id: str, req: ProductStatusUpdateRequest, db: sqlite3.Connection = Depends(get_db)):
+    if req.status not in ("draft", "incomplete", "asset_ready", "archived"):
+        raise HTTPException(status_code=400, detail=f"Invalid status: {req.status}")
+    cursor = db.cursor()
+    cursor.execute("SELECT id FROM products WHERE id = ?", (product_id,))
+    if not cursor.fetchone():
+        raise HTTPException(status_code=404, detail="Product not found")
+    cursor.execute("UPDATE products SET status = ?, updated_at = ? WHERE id = ?", (req.status, time.time(), product_id))
+    db.commit()
+    return {"product_id": product_id, "status": req.status}
+
+
+# --- Product Assets ---
+
+@app.post("/api/v1/products/{product_id}/assets")
+def register_product_asset(product_id: str, req: ProductAssetRegisterRequest, db: sqlite3.Connection = Depends(get_db)):
+    cursor = db.cursor()
+    cursor.execute("SELECT id FROM products WHERE id = ?", (product_id,))
+    if not cursor.fetchone():
+        raise HTTPException(status_code=404, detail="Product not found")
+    if not req.original_filename or not req.original_filename.strip():
+        raise HTTPException(status_code=400, detail="original_filename is required")
+    if not req.file_url or not req.file_url.strip():
+        raise HTTPException(status_code=400, detail="file_url is required")
+
+    # Infer role_key from filename
+    role_key, confidence = infer_asset_role(req.original_filename)
+
+    asset_id = f"pa_{uuid.uuid4().hex[:8]}"
+    now = time.time()
+    cursor.execute(
+        """INSERT INTO product_assets
+        (id, product_id, role_key, original_filename, file_url, mime_type,
+         file_size, width, height, role_confidence, role_source, role_confirmed, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (asset_id, product_id, role_key, req.original_filename, req.file_url,
+         req.mime_type, req.file_size, req.width, req.height,
+         confidence, "auto", 0, now, now),
+    )
+    db.commit()
+
+    # Recompute product status
+    cursor.execute("SELECT * FROM product_assets WHERE product_id = ?", (product_id,))
+    all_assets = cursor.fetchall()
+    assets_by_role: dict[str, list] = {}
+    role_confirmed_map: dict[str, bool] = {}
+    for r in all_assets:
+        rk = r["role_key"]
+        assets_by_role.setdefault(rk, []).append(dict(r))
+    for rk, alist in assets_by_role.items():
+        role_confirmed_map[rk] = all(a["role_confirmed"] for a in alist)
+    new_status = compute_product_status(assets_by_role, role_confirmed_map)
+    cursor.execute("UPDATE products SET status = ?, updated_at = ? WHERE id = ?", (new_status, time.time(), product_id))
+    db.commit()
+
+    return {
+        "asset_id": asset_id,
+        "product_id": product_id,
+        "role_key": role_key,
+        "role_confidence": confidence,
+        "role_source": "auto",
+        "role_confirmed": False,
+    }
+
+
+@app.put("/api/v1/products/{product_id}/assets/{asset_id}/role")
+def update_asset_role(product_id: str, asset_id: str, req: AssetRoleUpdateRequest, db: sqlite3.Connection = Depends(get_db)):
+    # Canonicalize and validate
+    canonical = canonicalize_role(req.role_key)
+    if canonical not in CANONICAL_ROLES and canonical != "unrecognized":
+        raise HTTPException(status_code=400, detail=f"Invalid role_key: {req.role_key}. Allowed: {sorted(CANONICAL_ROLES)}")
+
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM product_assets WHERE id = ? AND product_id = ?", (asset_id, product_id))
+    asset = cursor.fetchone()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found for this product")
+
+    now = time.time()
+    cursor.execute(
+        "UPDATE product_assets SET role_key = ?, role_source = 'manual', role_confirmed = 1, updated_at = ? WHERE id = ?",
+        (canonical, now, asset_id),
+    )
+    db.commit()
+
+    # Recompute product status
+    cursor.execute("SELECT * FROM product_assets WHERE product_id = ?", (product_id,))
+    all_assets = cursor.fetchall()
+    assets_by_role: dict[str, list] = {}
+    role_confirmed_map: dict[str, bool] = {}
+    for r in all_assets:
+        rk = r["role_key"]
+        assets_by_role.setdefault(rk, []).append(dict(r))
+    for rk, alist in assets_by_role.items():
+        role_confirmed_map[rk] = all(a["role_confirmed"] for a in alist)
+    new_status = compute_product_status(assets_by_role, role_confirmed_map)
+    cursor.execute("UPDATE products SET status = ?, updated_at = ? WHERE id = ?", (new_status, time.time(), product_id))
+    db.commit()
+
+    return {
+        "asset_id": asset_id,
+        "role_key": canonical,
+        "role_source": "manual",
+        "role_confirmed": True,
+    }
+
+
+@app.get("/api/v1/products/{product_id}/checklist")
+def get_product_checklist(product_id: str, db: sqlite3.Connection = Depends(get_db)):
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM products WHERE id = ?", (product_id,))
+    product = cursor.fetchone()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    cursor.execute("SELECT * FROM product_assets WHERE product_id = ? ORDER BY created_at", (product_id,))
+    all_assets = cursor.fetchall()
+
+    assets_by_role: dict[str, list[dict]] = {}
+    role_confirmed_map: dict[str, bool] = {}
+    for r in all_assets:
+        rk = r["role_key"]
+        rdict = {
+            "asset_id": r["id"],
+            "role_key": rk,
+            "original_filename": r["original_filename"],
+            "role_source": r["role_source"],
+            "role_confirmed": bool(r["role_confirmed"]),
+        }
+        assets_by_role.setdefault(rk, []).append(rdict)
+
+    for rk, alist in assets_by_role.items():
+        role_confirmed_map[rk] = all(a["role_confirmed"] for a in alist)
+
+    checklist = compute_checklist(assets_by_role, role_confirmed_map)
+
+    return {
+        "product_id": product["id"],
+        "product_type": product["product_type"],
+        **checklist,
+    }
+
 
 if __name__ == "__main__":
     import uvicorn
