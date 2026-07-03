@@ -3,18 +3,41 @@ MVP-3 Sprint 1: Product asset package tests.
 """
 import os
 import sys
+import tempfile
 import unittest
+import uuid
+
+# --- Test DB isolation ---
+# Use a shared temp database for all backend tests so `discover` can
+# run multiple test modules in the same process without DB conflicts.
+if "TEST_DATABASE_PATH" not in os.environ:
+    _test_db_fd, _test_db_path = tempfile.mkstemp(
+        suffix=".sqlite3", prefix="test_shared_"
+    )
+    os.environ["TEST_DATABASE_PATH"] = _test_db_path
+else:
+    _test_db_fd = None
+    _test_db_path = os.environ["TEST_DATABASE_PATH"]
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../app")))
 
 from fastapi.testclient import TestClient
 from main import app, init_db
 
-import uuid
-
 # Ensure the database is initialized before any tests run
 # (TestClient does not automatically trigger FastAPI startup events)
 init_db()
+
+
+def setUpModule():
+    pass  # DB already initialized above
+
+
+def tearDownModule():
+    """Clean up the temp DB file handle. The file itself and env var are kept
+    for other test modules that may run later in the same process (discover)."""
+    if _test_db_fd is not None:
+        os.close(_test_db_fd)
 
 # Counter for unique SKU generation
 _sku_counter = 0
@@ -234,15 +257,44 @@ class TestChecklist(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertFalse(data["is_ready"])
-        self.assertIn("main", data["missing_required_roles"])
+        # main has an asset but it's unconfirmed → NOT in missing, IS in unconfirmed
+        self.assertNotIn("main", data["missing_required_roles"])
+        self.assertIn("main", data["unconfirmed_required_roles"])
+
+    def test_only_main_unconfirmed_all_others_missing(self):
+        """Upload only main (unconfirmed): missing = others, unconfirmed = main."""
+        self.client.post(f"/api/v1/products/{self.product_id}/assets", json={
+            "original_filename": "only_main.jpg", "file_url": "/mock/main.jpg",
+        })
+        resp = self.client.get(f"/api/v1/products/{self.product_id}/checklist")
+        data = resp.json()
+        self.assertFalse(data["is_ready"])
+        # main has asset but unconfirmed
+        self.assertNotIn("main", data["missing_required_roles"])
+        self.assertIn("main", data["unconfirmed_required_roles"])
+        # detail1, detail2, scene, brand are completely missing
+        for role in ["detail1", "detail2", "scene", "brand"]:
+            self.assertIn(role, data["missing_required_roles"])
+
+    def test_all_required_uploaded_but_unconfirmed(self):
+        """Upload all 5 required roles but don't confirm any."""
+        for fn in [
+            "SKU_main.jpg", "SKU_detail1.jpg", "SKU_detail2.jpg",
+            "SKU_scene.jpg", "SKU_brand.jpg",
+        ]:
+            self.client.post(f"/api/v1/products/{self.product_id}/assets", json={
+                "original_filename": fn, "file_url": f"/mock/{fn}",
+            })
+        resp = self.client.get(f"/api/v1/products/{self.product_id}/checklist")
+        data = resp.json()
+        self.assertFalse(data["is_ready"])
+        self.assertEqual(len(data["missing_required_roles"]), 0)
+        self.assertEqual(len(data["unconfirmed_required_roles"]), 5)
 
     def test_checklist_ready_when_all_required_confirmed(self):
         for fn in [
-            "SKU2027-T03_main.jpg",
-            "SKU2027-T03_detail1.jpg",
-            "SKU2027-T03_detail2.jpg",
-            "SKU2027-T03_scene.jpg",
-            "SKU2027-T03_brand.jpg",
+            "SKU_main.jpg", "SKU_detail1.jpg", "SKU_detail2.jpg",
+            "SKU_scene.jpg", "SKU_brand.jpg",
         ]:
             self._register_and_confirm(fn)
 
@@ -250,15 +302,13 @@ class TestChecklist(unittest.TestCase):
         data = resp.json()
         self.assertTrue(data["is_ready"])
         self.assertEqual(len(data["missing_required_roles"]), 0)
+        self.assertEqual(len(data["unconfirmed_required_roles"]), 0)
 
     def test_ready_without_motion(self):
         """Missing motion should NOT block ready."""
         for fn in [
-            "SKU2027-T03_main.jpg",
-            "SKU2027-T03_detail1.jpg",
-            "SKU2027-T03_detail2.jpg",
-            "SKU2027-T03_scene.jpg",
-            "SKU2027-T03_brand.jpg",
+            "SKU_main.jpg", "SKU_detail1.jpg", "SKU_detail2.jpg",
+            "SKU_scene.jpg", "SKU_brand.jpg",
         ]:
             self._register_and_confirm(fn)
 
@@ -306,8 +356,10 @@ class TestChecklist(unittest.TestCase):
         })
         resp = self.client.get(f"/api/v1/products/{self.product_id}/checklist")
         data = resp.json()
-        # Role is flagged because not all main assets are confirmed
-        self.assertIn("main", data["missing_required_roles"])
+        # Role has duplicate assets; not all are confirmed → main is unconfirmed
+        self.assertIn("main", data["duplicate_roles"])
+        self.assertIn("main", data["unconfirmed_required_roles"])
+        self.assertNotIn("main", data["missing_required_roles"])
 
 
 class TestProductListAndStatus(unittest.TestCase):

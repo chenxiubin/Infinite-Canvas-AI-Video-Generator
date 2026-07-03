@@ -91,10 +91,29 @@ motion/运镜/翻页 → motion, brand/尾帧/logo → brand。
 
 - required_roles: main, detail1, detail2, scene, brand
 - recommended_roles: motion
-- 所有 required roles 已确认 → `is_ready=true`
+- `missing_required_roles`: 完全没有素材的 required role
+- `unconfirmed_required_roles`: 有素材但未确认的 required role
+- 所有 required roles 已存在且已确认 → `is_ready=true`
 - 只缺 motion 不阻断 ready
 - 重复 role 时提示 `duplicate_roles`
 - 无法识别的文件在 `unrecognized_assets` 中提示
+
+**语义区分**：
+
+| 字段 | 含义 | 示例场景 |
+|------|------|---------|
+| `missing_required_roles` | 该 role 没有任何素材 | 根本没上传 detail1 的图片 |
+| `unconfirmed_required_roles` | 有素材但 role_confirmed=false | 上传了 main 但未经人工确认 |
+
+示例：只上传 main 但未确认：
+
+```json
+{
+  "missing_required_roles": ["detail1", "detail2", "scene", "brand"],
+  "unconfirmed_required_roles": ["main"],
+  "is_ready": false
+}
+```
 
 ## 8. Motion fallback 规则
 
@@ -117,15 +136,15 @@ motion/运镜/翻页 → motion, brand/尾帧/logo → brand。
 
 ## 10. 测试用例
 
-30 个测试用例，位于 `backend/tests/test_product_assets.py`：
+33 个测试用例，位于 `backend/tests/test_product_assets.py`：
 
 - TestProductCreation: 5 个（创建台历/挂历、非法类型、重复 SKU、空 SKU）
 - TestAssetRoleInference: 12 个（各 role 关键词识别、中文关键词、旧别名兼容、未识别、auto 默认未确认、404）
 - TestManualRoleConfirmation: 3 个（手动确认、非法 role、资产不存在）
-- TestChecklist: 6 个（未确认→未就绪、全部确认→就绪、缺 motion→就绪、fallback to scene、fallback to main、重复 role）
+- TestChecklist: 9 个（未确认→missing/unconfirmed 分离、仅 main 未确认、全部上传未确认、全部确认→就绪、缺 motion→就绪、fallback to scene、fallback to main、重复 role）
 - TestProductListAndStatus: 4 个（列表、类型过滤、归档、详情含 assets+checklist）
 
-全部 30 条通过。
+全部 33 条通过。
 
 ## 11. 当前不做范围
 

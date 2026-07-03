@@ -40,8 +40,21 @@ app.add_middleware(
 
 # Database Setup
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_FILE = os.path.join(BASE_DIR, "db.sqlite3")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
+
+
+def _get_db_path() -> str:
+    """Return the database file path.
+    Uses TEST_DATABASE_PATH env var if set (for test isolation).
+    """
+    return os.environ.get(
+        "TEST_DATABASE_PATH",
+        os.path.join(BASE_DIR, "db.sqlite3"),
+    )
+
+
+# Module-level default (used by uvicorn at startup; tests override via env var)
+DB_FILE = _get_db_path()
 UPLOAD_DIR = os.path.join(STATIC_DIR, "uploads")
 MOCK_ASSETS_DIR = os.path.join(STATIC_DIR, "mock_assets")
 

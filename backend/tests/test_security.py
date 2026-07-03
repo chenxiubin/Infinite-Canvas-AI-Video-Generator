@@ -1,12 +1,34 @@
 import os
 import sys
+import tempfile
 import unittest
 from fastapi.testclient import TestClient
+
+# --- Test DB isolation ---
+# Use a shared temp database for all backend tests (see test_product_assets.py).
+if "TEST_DATABASE_PATH" not in os.environ:
+    _test_db_fd, _test_db_path = tempfile.mkstemp(
+        suffix=".sqlite3", prefix="test_shared_"
+    )
+    os.environ["TEST_DATABASE_PATH"] = _test_db_path
+else:
+    _test_db_fd = None
+    _test_db_path = os.environ["TEST_DATABASE_PATH"]
 
 # Add app folder to path to import main
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../app")))
 
-from main import app
+from main import app, init_db
+
+# Initialize database in the temp file
+init_db()
+
+
+def tearDownModule():
+    """Clean up the temp DB file handle. The file itself and env var are kept
+    for other test modules that may run later in the same process (discover)."""
+    if _test_db_fd is not None:
+        os.close(_test_db_fd)
 
 class TestSecurityRestriction(unittest.TestCase):
     def setUp(self):

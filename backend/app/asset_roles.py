@@ -129,12 +129,16 @@ def compute_checklist(
         role_confirmed_map: dict mapping canonical role_key -> bool (all confirmed for that role)
 
     Returns:
-        Checklist dict with is_ready, missing roles, duplicates, fallback plan, etc.
+        Checklist dict with:
+        - missing_required_roles: roles with ZERO assets at all
+        - unconfirmed_required_roles: roles with assets but none confirmed
+        - is_ready: True only when all required roles are present AND confirmed
     """
     required_roles = ["main", "detail1", "detail2", "scene", "brand"]
     recommended_roles = ["motion"]
 
-    missing_required = []
+    missing_required = []      # No assets at all
+    unconfirmed_required = []  # Assets exist but none confirmed
     missing_recommended = []
     duplicate_roles = []
     unrecognized_assets = assets_by_role.get("unrecognized", [])
@@ -147,8 +151,7 @@ def compute_checklist(
             if len(assets) > 1:
                 duplicate_roles.append(role)
             if not role_confirmed_map.get(role, False):
-                # Has assets but none confirmed → still missing for is_ready
-                missing_required.append(role)
+                unconfirmed_required.append(role)
 
     for role in recommended_roles:
         assets = assets_by_role.get(role, [])
@@ -158,7 +161,6 @@ def compute_checklist(
     # Build fallback plan for missing motion
     fallback_plan = {}
     if "motion" in missing_recommended:
-        # Check scene first, then main
         scene_assets = assets_by_role.get("scene", [])
         main_assets = assets_by_role.get("main", [])
         if scene_assets and (len(scene_assets) == 1 or role_confirmed_map.get("scene")):
@@ -172,12 +174,13 @@ def compute_checklist(
                 "fallback_source": "fallback_from_main",
             }
 
-    is_ready = len(missing_required) == 0
+    is_ready = (len(missing_required) == 0 and len(unconfirmed_required) == 0)
 
     return {
         "required_roles": required_roles,
         "recommended_roles": recommended_roles,
         "missing_required_roles": missing_required,
+        "unconfirmed_required_roles": unconfirmed_required,
         "missing_recommended_roles": missing_recommended,
         "duplicate_roles": duplicate_roles,
         "unrecognized_assets": [
