@@ -233,6 +233,35 @@ class TestVideoBatchCreation(unittest.TestCase):
         })
         self.assertEqual(r.status_code, 400)
 
+    def test_motion_and_scene_both_missing_blocks_batch(self):
+        """When both motion AND scene are missing, scene being required means
+        checklist is not ready and batch creation must be blocked."""
+        import uuid as _uuid
+        sku = f"NOSCENE-{_uuid.uuid4().hex[:6]}"
+        r = self.client.post("/api/v1/products", json={
+            "product_type": "desk_calendar", "sku": sku, "title": "No Scene",
+        })
+        pid = r.json()["product_id"]
+        # Register and confirm main, detail1, detail2, brand — but NOT scene
+        for role in ["main", "detail1", "detail2", "brand"]:
+            fn = f"{sku}_{role}.jpg"
+            ar = self.client.post(f"/api/v1/products/{pid}/assets", json={
+                "original_filename": fn, "file_url": f"/mock/{fn}",
+            })
+            aid = ar.json()["asset_id"]
+            self.client.put(f"/api/v1/products/{pid}/assets/{aid}/role", json={"role_key": role})
+        # Verify checklist not ready (scene missing)
+        chk = self.client.get(f"/api/v1/products/{pid}/checklist")
+        self.assertFalse(chk.json()["is_ready"])
+        self.assertIn("scene", chk.json()["missing_required_roles"])
+        # Batch creation must fail
+        r = self.client.post("/api/v1/video-batches", json={
+            "template_id": self.desk_template_id, "product_ids": [pid],
+        })
+        self.assertEqual(r.status_code, 400)
+        detail = r.json()["detail"]
+        self.assertIn("scene", detail["missing_required_roles"])
+
     def test_duplicate_product_ids_returns_400(self):
         pid = _create_ready_product(self.client)
         r = self.client.post("/api/v1/video-batches", json={
