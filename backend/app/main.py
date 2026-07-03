@@ -380,6 +380,8 @@ def init_db():
         ("prompt_version", "TEXT DEFAULT ''"),
         ("submitted_at", "REAL"),
         ("polled_at", "REAL"),
+        ("request_payload_summary", "TEXT DEFAULT ''"),
+        ("response_payload_summary", "TEXT DEFAULT ''"),
     ]:
         try:
             cursor.execute(f"ALTER TABLE video_generation_jobs ADD COLUMN {col} {col_def}")

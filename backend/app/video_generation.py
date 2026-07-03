@@ -228,15 +228,20 @@ def run_mock_generation_for_node(
 
     # Update job with gateway metadata
     now = time.time()
+    import json as _json
+    req_summary = _json.dumps({"shot_key": shot_key, "duration": node.get("duration_seconds", 4), "adapter": model_adapter}, ensure_ascii=False)
+    resp_summary = _json.dumps({"status": gateway_result.get("status"), "provider_job_id": gateway_result.get("provider_job_id", ""), "has_video": bool(gateway_result.get("video_url"))}, ensure_ascii=False)
     cursor.execute(
         """UPDATE video_generation_jobs
         SET adapter_key = ?, provider_name = ?, provider_job_id = ?, provider_status = ?,
-            model_name = ?, model_version = ?, cost_estimate = ?, submitted_at = ?
+            model_name = ?, model_version = ?, cost_estimate = ?, submitted_at = ?,
+            request_payload_summary = ?, response_payload_summary = ?
         WHERE id = ?""",
         (gateway_result.get("adapter_key", "mock"), gateway_result.get("provider_name", "mock"),
          gateway_result.get("provider_job_id", ""), gateway_result.get("status", ""),
          gateway_result.get("model_name", "mock_image_to_video"), gateway_result.get("model_version", "mock-v1"),
-         gateway_result.get("cost_estimate", 0.0), now, job_id),
+         gateway_result.get("cost_estimate", 0.0), now,
+         req_summary, resp_summary, job_id),
     )
 
     gw_status = gateway_result.get("status", "success")
