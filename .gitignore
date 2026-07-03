@@ -18,6 +18,9 @@ frontend/playwright-report/
 *.swo
 .DS_Store
 
+# Claude Code
+.claude/settings.local.json
+
 # Environment
 .env
 .env.local
