@@ -641,11 +641,56 @@ test.describe('Infinite Canvas Video Generator - MVP-2 Tests', () => {
     await expect(page.locator('text=✨ 已手动修复')).toBeVisible();
   });
 
-  test('K2. force_statuses精确失败注入—节点级隔离性验证', async ({ request }) => {
+  test('K2-a. force_statuses安全拦截验证 (TESTING=false)', async ({ request }) => {
+    test.setTimeout(30000);
+    const BACKEND = 'http://127.0.0.1:8000';
+
+    // Create a real canvas and batch with 2 instances
+    const cvResp = await request.post(`${BACKEND}/api/v1/canvases`);
+    expect(cvResp.ok()).toBeTruthy();
+    const { canvas_id } = await cvResp.json();
+
+    const assets = [];
+    for (let i = 0; i < 2; i++) {
+      const sku = `SKU2027-A0${i + 1}`;
+      assets.push({ filename: `${sku}_main.jpg`, url: `https://example.com/${sku}_main.jpg` });
+    }
+    const batchResp = await request.post(`${BACKEND}/api/v1/canvases/${canvas_id}/instances/batch`, {
+      data: { template_id: 'tpl_hanging', assets },
+    });
+    expect(batchResp.ok()).toBeTruthy();
+    const { batch_id, instances } = await batchResp.json();
+    const ins01 = instances[0].instance_id;
+
+    // Call generate with valid compound-key force_statuses — must be 403 blocked
+    const genResp = await request.post(`${BACKEND}/api/v1/batches/${batch_id}/generate`, {
+      data: { force_statuses: { [`${ins01}:S02_detail1`]: 'failed' } },
+    });
+    expect(genResp.status(), 'force_statuses must be 403 when TESTING=false').toBe(403);
+
+    // Verify batch was NOT touched — still queued, no nodes modified
+    const checkResp = await request.get(`${BACKEND}/api/v1/batches/${batch_id}`);
+    const checkData = await checkResp.json();
+    expect(checkData.status, 'batch must remain queued after 403 rejection').toBe('queued');
+
+    // Verify ins_01 nodes are still in their original state (S06_brand=success, others=pending)
+    const instResp = await request.get(`${BACKEND}/api/v1/instances/${ins01}`);
+    const instData = await instResp.json();
+    for (const n of instData.nodes) {
+      if (n.data.nodeType !== 'shot') continue;
+      if (n.data.isFixed) {
+        expect(n.data.status, `fixed node ${n.id}`).toBe('success');
+      } else {
+        expect(n.data.status, `non-fixed node ${n.id} must still be pending after 403`).toBe('pending');
+      }
+    }
+  });
+
+  test('K2-b. force_statuses节点级隔离验证 (TESTING=true)', async ({ request }) => {
     test.setTimeout(120000);
     const BACKEND = 'http://127.0.0.1:8000';
 
-    // --- Setup: Create canvas + 2 complete instances via batch clone ---
+    // --- Setup: Create canvas + 2 complete instances ---
     const cvResp = await request.post(`${BACKEND}/api/v1/canvases`);
     expect(cvResp.ok()).toBeTruthy();
     const { canvas_id } = await cvResp.json();
@@ -673,22 +718,20 @@ test.describe('Infinite Canvas Video Generator - MVP-2 Tests', () => {
     const ins01 = instances[0].instance_id;
     const ins02 = instances[1].instance_id;
 
-    // --- Phase 1: Verify force_statuses is BLOCKED when TESTING=false ---
-    const blockedResp = await request.post(`${BACKEND}/api/v1/batches/${batch_id}/generate`, {
+    // --- Gate: force_statuses must NOT be 403 — if it is, TESTING=false, cannot proceed ---
+    const gateResp = await request.post(`${BACKEND}/api/v1/batches/${batch_id}/generate`, {
       data: { force_statuses: { [`${ins01}:S03_detail2`]: 'failed' } },
     });
-    // When TESTING=false on the backend, this must return 403
-    if (blockedResp.status() === 403) {
-      console.log('K2: force_statuses correctly blocked (403) when TESTING=false. Security check PASSED.');
-      console.log('K2: Restart backend with TESTING=true to run the full isolation verification.');
-      // Security verification done — test passes
-      return;
+    if (gateResp.status() === 403) {
+      throw new Error(
+        'K2-b REQUIRES backend started with TESTING=true. ' +
+        'Current backend returned 403 on force_statuses. ' +
+        'Restart backend: TESTING=true python -m uvicorn app.main:app ...'
+      );
     }
+    expect(gateResp.ok(), `generate should return 200, got ${gateResp.status()}`).toBeTruthy();
 
-    // --- Phase 2 (TESTING=true only): Full isolation verification ---
-    expect(blockedResp.ok()).toBeTruthy();
-
-    // Wait for batch to finish
+    // --- Wait for batch to finish ---
     let batchStatus = '';
     const pollStart = Date.now();
     while (Date.now() - pollStart < 120000) {
@@ -699,13 +742,14 @@ test.describe('Infinite Canvas Video Generator - MVP-2 Tests', () => {
       await new Promise(r => setTimeout(r, 2000));
     }
 
+    // --- Assert: batch overall status ---
     expect(batchStatus, `Batch status: ${batchStatus}`).toBe('partially_completed');
     const fbResp = await request.get(`${BACKEND}/api/v1/batches/${batch_id}`);
     const fb = await fbResp.json();
     expect(fb.completed_count).toBe(1);
     expect(fb.failed_count).toBe(1);
 
-    // Verify ins_01 isolation: S03_detail2=failed, others=success
+    // --- Assert: ins_01 isolation (only S03_detail2=failed, rest=success) ---
     const r1 = await request.get(`${BACKEND}/api/v1/instances/${ins01}`);
     const d1 = await r1.json();
     const m1: Record<string, any> = {};
@@ -715,7 +759,7 @@ test.describe('Infinite Canvas Video Generator - MVP-2 Tests', () => {
       expect(m1[nk].data.status, `${nk} in ins_01`).toBe('success');
     }
 
-    // Verify ins_02 completely unaffected
+    // --- Assert: ins_02 completely unaffected ---
     const r2 = await request.get(`${BACKEND}/api/v1/instances/${ins02}`);
     const d2 = await r2.json();
     expect(d2.status).toBe('completed');

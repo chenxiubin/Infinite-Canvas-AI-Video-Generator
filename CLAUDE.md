@@ -61,15 +61,24 @@
 ## 测试命令
 
 ```bash
-# 运行后端单元测试
-cd frontend && npm run test:backend
+# 运行后端单元测试（安全校验，两种 TESTING 模式均可）
+cd backend && python -m unittest discover -s tests -v
 
-# 运行 MVP-2 E2E 全量回归
-cd frontend && npx playwright test --grep "G1|G2|H1|H2|H3|I1|I2|I3|I4|J1|J3|J4|K1"
+# TESTING=false 全量回归（含 K2-a 安全拦截验证，不含 K2-b）
+cd frontend && npx playwright test --grep "G1|G2|H1|H2|H3|I1|I2|I3|I4|J1|J3|J4|K1|K2-a"
+
+# TESTING=true 全量回归（含 K2-b 隔离性验证，不含 K2-a）
+cd frontend && npx playwright test --grep "G1|G2|H1|H2|H3|I1|I2|I3|I4|J1|J3|J4|K1|K2-b"
 
 # 运行单个测试
 cd frontend && npx playwright test --grep "K1"
 ```
+
+环境说明：
+- **TESTING=false**（默认）：安全拦截生效。K2-a 验证 403 拦截；K2-b 会明确报错"需要 TESTING=true"
+- **TESTING=true**：安全拦截解除。K2-a 在此模式下会失败（预期行为，因为 403 被绕过）
+- K2-a/K2-b 分别独立报告结果，不能混为一谈："K2-a Pass" = 安全拦截生效，"K2-b Pass" = 隔离性逻辑正确
+- 两条全量回归命令都跑通，才能说全部用例通过
 
 启动命令：
 ```bash
