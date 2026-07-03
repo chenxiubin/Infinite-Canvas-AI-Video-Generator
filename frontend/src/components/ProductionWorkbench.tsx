@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as api from '../api/mvp3';
 import { ProductionCanvasView } from './ProductionCanvasView';
+import { ProductionStatusSummary } from './ProductionStatusSummary';
 
 type NodeStatus = 'pending' | 'running' | 'success' | 'failed';
-
 interface NodeItem { node_id: string; shot_key: string; status: NodeStatus; [key: string]: any }
 interface InstanceData { instance_id: string; status: string; draft_preview_url?: string; review_status?: string; export_status?: string; final_video_url?: string; nodes?: NodeItem[] }
 
@@ -22,6 +22,7 @@ function StatusBadge({ status }: { status: string }) {
 export const ProductionWorkbench: React.FC = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState('');
+  const [demoLog, setDemoLog] = useState<string[]>([]);
   const [productId, setProductId] = useState('');
   const [checklist, setChecklist] = useState<any>(null);
   const [templates, setTemplates] = useState<any[]>([]);
@@ -31,7 +32,6 @@ export const ProductionWorkbench: React.FC = () => {
   const [nodes, setNodes] = useState<NodeItem[]>([]);
   const [viewMode, setViewMode] = useState<'form' | 'canvas'>('form');
 
-  // Refs for stable closure access (avoid stale React state in handlers)
   const batchIdRef = useRef('');
   const instanceRef = useRef<InstanceData | null>(null);
   useEffect(() => { batchIdRef.current = batchId; }, [batchId]);
@@ -55,14 +55,91 @@ export const ProductionWorkbench: React.FC = () => {
     api.listVideoTemplates().then(d => setTemplates(d.templates || [])).catch(() => {});
   }, []);
 
-  // --- Handlers (use refs to avoid stale closures) ---
+  const addLog = (msg: string) => setDemoLog(prev => [...prev, msg]);
 
+  // --- Full Demo ---
+  const handleFullDemo = async () => {
+    try { clearError(); setDemoLog([]); setLoading('Running full demo...');
+      // 1. Create product
+      addLog('creating product...');
+      const s = `SKU-DEMO-${Date.now()}`;
+      const d = await api.createProduct({ product_type: 'desk_calendar', sku: s, title: `Demo ${s}` });
+      const pid = d.product_id; setProductId(pid);
+      addLog('product created');
+
+      // 2. Register assets
+      for (const r of ['main', 'detail1', 'detail2', 'scene', 'brand']) {
+        await api.registerAsset(pid, { original_filename: `${s}_${r}.jpg`, file_url: `/mock/${s}_${r}.jpg` });
+      }
+      addLog('assets registered');
+
+      // 3. Confirm roles
+      const dd = await api.getProduct(pid);
+      for (const a of (dd.assets || [])) {
+        if (a.role_key !== 'unrecognized') await api.updateAssetRole(pid, a.asset_id, a.role_key);
+      }
+      await refreshProduct(pid);
+      addLog('roles confirmed, checklist ready');
+
+      // 4. Select template
+      const tplId = templates.find(t => t.product_type === 'desk_calendar')?.template_id || (await api.listVideoTemplates('desk_calendar')).templates[0].template_id;
+      setSelTemplateId(tplId);
+      addLog('template selected');
+
+      // 5. Create batch
+      const bd = await api.createVideoBatch(tplId, [pid]);
+      setBatchId(bd.batch_id); batchIdRef.current = bd.batch_id;
+      addLog('video batch created');
+
+      // 6. Load instance
+      if (bd.instances?.length) {
+        const inst = await api.getVideoInstance(bd.instances[0].instance_id);
+        setInstance(inst); setNodes(inst.nodes || []);
+        addLog('instance loaded, 6 nodes pending');
+      }
+
+      // 7. Generate
+      await api.generateVideoBatch(bd.batch_id);
+      const freshBatch = await api.getVideoBatch(bd.batch_id);
+      if (freshBatch.instances?.length) {
+        const freshInst = await api.getVideoInstance(freshBatch.instances[0].instance_id);
+        setInstance(freshInst); setNodes(freshInst.nodes || []);
+        const ok = freshInst.nodes?.every((n: any) => n.status === 'success');
+        addLog(ok ? '6 nodes generated success' : 'some nodes failed');
+      }
+
+      // 8. Merge
+      await api.mergePreview(freshBatch.instances[0].instance_id);
+      const mergedInst = await api.getVideoInstance(freshBatch.instances[0].instance_id);
+      setInstance(mergedInst); setNodes(mergedInst.nodes || []);
+      addLog('draft preview generated');
+
+      // 9. Approve
+      await api.reviewInstance(mergedInst.instance_id, 'approve');
+      const approvedInst = await api.getVideoInstance(mergedInst.instance_id);
+      setInstance(approvedInst); setNodes(approvedInst.nodes || []);
+      addLog('review approved');
+
+      // 10. Export
+      await api.exportInstance(approvedInst.instance_id);
+      const exportedInst = await api.getVideoInstance(approvedInst.instance_id);
+      setInstance(exportedInst); setNodes(exportedInst.nodes || []);
+      addLog('mock export completed');
+
+    } catch (e) { showError(e); addLog(`ERROR: ${e?.message || e}`); } finally { setLoading(''); }
+  };
+
+  const handleReset = () => {
+    setProductId(''); setChecklist(null); setBatchId(''); setInstance(null); setNodes([]);
+    setSelTemplateId(''); setError(''); setDemoLog([]); batchIdRef.current = ''; instanceRef.current = null;
+  };
+
+  // --- Per-step handlers ---
   const handleDemoDesk = async () => {
     try { clearError(); setLoading('Creating demo...');
       const s = `SKU-DEMO-${Date.now()}`;
       const d = await api.createProduct({ product_type: 'desk_calendar', sku: s, title: `Demo ${s}` });
-      const pid = d.product_id;
-      setProductId(pid);
+      const pid = d.product_id; setProductId(pid);
       for (const r of ['main', 'detail1', 'detail2', 'scene', 'brand']) {
         await api.registerAsset(pid, { original_filename: `${s}_${r}.jpg`, file_url: `/mock/${s}_${r}.jpg` });
       }
@@ -79,9 +156,7 @@ export const ProductionWorkbench: React.FC = () => {
     try { clearError(); setLoading('Creating batch...');
       const d = await api.createVideoBatch(selTemplateId, [productId]);
       setBatchId(d.batch_id); batchIdRef.current = d.batch_id;
-      if (d.instances?.length) {
-        await loadInstance(d.instances[0].instance_id);
-      }
+      if (d.instances?.length) await loadInstance(d.instances[0].instance_id);
     } catch (e) { showError(e); } finally { setLoading(''); }
   };
 
@@ -90,42 +165,25 @@ export const ProductionWorkbench: React.FC = () => {
     if (!bid) return;
     try { clearError(); setLoading('Generating...');
       await api.generateVideoBatch(bid);
-      // Directly reload instance to refresh nodes in state
       const bd = await api.getVideoBatch(bid);
       if (bd.instances?.length) {
-        const iid = bd.instances[0].instance_id;
-        const freshInst = await api.getVideoInstance(iid);
-        setInstance(freshInst);
-        setNodes(freshInst.nodes || []);
+        const freshInst = await api.getVideoInstance(bd.instances[0].instance_id);
+        setInstance(freshInst); setNodes(freshInst.nodes || []);
       }
     } catch (e) { showError(e); } finally { setLoading(''); }
   };
 
   const handleMerge = async () => {
-    const inst = instanceRef.current;
-    if (!inst) return;
-    try { clearError(); setLoading('Merging...');
-      await api.mergePreview(inst.instance_id);
-      await loadInstance(inst.instance_id);
-    } catch (e) { showError(e); } finally { setLoading(''); }
+    const inst = instanceRef.current; if (!inst) return;
+    try { clearError(); setLoading('Merging...'); await api.mergePreview(inst.instance_id); await loadInstance(inst.instance_id); } catch (e) { showError(e); } finally { setLoading(''); }
   };
-
   const handleApproveAll = async () => {
-    const inst = instanceRef.current;
-    if (!inst) return;
-    try { clearError(); setLoading('Approving...');
-      await api.reviewInstance(inst.instance_id, 'approve');
-      await loadInstance(inst.instance_id);
-    } catch (e) { showError(e); } finally { setLoading(''); }
+    const inst = instanceRef.current; if (!inst) return;
+    try { clearError(); setLoading('Approving...'); await api.reviewInstance(inst.instance_id, 'approve'); await loadInstance(inst.instance_id); } catch (e) { showError(e); } finally { setLoading(''); }
   };
-
   const handleExport = async () => {
-    const inst = instanceRef.current;
-    if (!inst) return;
-    try { clearError(); setLoading('Exporting...');
-      await api.exportInstance(inst.instance_id);
-      await loadInstance(inst.instance_id);
-    } catch (e) { showError(e); } finally { setLoading(''); }
+    const inst = instanceRef.current; if (!inst) return;
+    try { clearError(); setLoading('Exporting...'); await api.exportInstance(inst.instance_id); await loadInstance(inst.instance_id); } catch (e) { showError(e); } finally { setLoading(''); }
   };
 
   const allSuccess = nodes.length > 0 && nodes.every(n => n.status === 'success');
@@ -134,24 +192,54 @@ export const ProductionWorkbench: React.FC = () => {
 
   return (
     <div data-testid="mvp3-workbench" className="min-h-screen bg-[#0f172a] text-gray-200 p-6 font-sans">
-      <h1 className="text-xl font-bold mb-1">MVP-3 视频生产工作台</h1>
-      <div className="flex gap-2 mb-4">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <h1 className="text-xl font-bold">MVP-3 AI 视频生产工作台</h1>
+          <p className="text-xs text-gray-500">产品素材包 → 视频模板 → Mock 生成 → 草稿预览 → 审核 → Mock 导出 → 画布可视化</p>
+        </div>
+        <div className="flex gap-2">
+          <button data-testid="run-full-demo-button" onClick={handleFullDemo} className="bg-emerald-600 hover:bg-emerald-500 text-white text-sm px-4 py-1.5 rounded font-medium">一键运行 Demo</button>
+          <button data-testid="reset-current-state-button" onClick={handleReset} className="bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs px-3 py-1 rounded">重置</button>
+        </div>
+      </div>
+
+      {/* View toggle */}
+      <div className="flex gap-2 mb-3">
         <button data-testid="workbench-tab-form" onClick={() => setViewMode('form')}
           className={`text-xs px-3 py-1 rounded ${viewMode === 'form' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400'}`}>工作台</button>
         <button data-testid="workbench-tab-canvas" onClick={() => setViewMode('canvas')}
           className={`text-xs px-3 py-1 rounded ${viewMode === 'canvas' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400'}`}>画布视图</button>
       </div>
+
       {loading && <div className="text-blue-400 text-xs mb-2">{loading}</div>}
       {error && <div data-testid="error-message" className="bg-red-900/50 border border-red-500/50 text-red-300 px-4 py-3 rounded mb-4 text-sm">{error}<button onClick={clearError} className="ml-4 text-red-400">x</button></div>}
 
+      {/* Demo step log */}
+      {demoLog.length > 0 && (
+        <div data-testid="demo-step-log" className="bg-[#1e293b] border border-white/10 rounded-lg p-3 mb-4 text-xs text-gray-400">
+          <div className="text-gray-300 font-medium mb-1">Demo 步骤</div>
+          {demoLog.map((msg, i) => (
+            <div key={i} className="text-gray-500">{i + 1}. {msg}</div>
+          ))}
+          {demoLog[demoLog.length - 1] === 'mock export completed' && (
+            <div data-testid="demo-complete-message" className="text-green-400 font-medium mt-1">Demo 流程已完成</div>
+          )}
+        </div>
+      )}
+
+      {/* Status summary — always visible */}
+      <ProductionStatusSummary productId={productId} checklist={checklist} selTemplateId={selTemplateId}
+        batchId={batchId} batchStatus={instance?.status || 'ready'} nodes={nodes} instance={instance} />
+
+      {/* Canvas view */}
       {viewMode === 'canvas' && (
         <ProductionCanvasView instance={instance} nodes={nodes} onRefresh={() => {
-          if (instanceRef.current) {
-            api.getVideoInstance(instanceRef.current.instance_id).then(i => { setInstance(i); setNodes(i.nodes || []); }).catch(() => {});
-          }
+          if (instanceRef.current) api.getVideoInstance(instanceRef.current.instance_id).then(i => { setInstance(i); setNodes(i.nodes || []); }).catch(() => {});
         }} />
       )}
 
+      {/* Form view */}
       {viewMode === 'form' && (<>
       {/* 1. Product */}
       <section className="bg-[#1e293b] border border-white/10 rounded-lg p-4 mb-4">
@@ -183,8 +271,7 @@ export const ProductionWorkbench: React.FC = () => {
       {/* 3. Batch */}
       <section className="bg-[#1e293b] border border-white/10 rounded-lg p-4 mb-4">
         <h2 className="text-sm font-semibold mb-3">3. 视频批次</h2>
-        <button data-testid="create-video-batch-button" disabled={!isReady || !selTemplateId}
-          onClick={handleCreateBatch}
+        <button data-testid="create-video-batch-button" disabled={!isReady || !selTemplateId} onClick={handleCreateBatch}
           className="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm px-3 py-1 rounded">创建 Batch</button>
         {batchId && <div data-testid="batch-id" className="text-xs text-gray-400 mt-2">batch_id: {batchId}</div>}
         {instance && <div data-testid="instance-id" className="text-xs text-gray-400">instance_id: {instance.instance_id}</div>}
@@ -213,12 +300,10 @@ export const ProductionWorkbench: React.FC = () => {
           <div className="space-y-3">
             <button data-testid="merge-preview-button" onClick={handleMerge} className="bg-purple-700 hover:bg-purple-600 text-white text-sm px-3 py-1 rounded">Merge Preview</button>
             {instance.draft_preview_url && <div data-testid="draft-preview-url" className="text-green-400 text-xs mt-1">{instance.draft_preview_url}</div>}
-
             <div>
               <div data-testid="instance-review-status" className="text-xs text-gray-400 mb-1">review: {instance.review_status || '-'}</div>
               <button data-testid="approve-all-button" onClick={handleApproveAll} className="bg-green-700 hover:bg-green-600 text-white text-sm px-3 py-1 rounded mt-1">Approve All</button>
             </div>
-
             <div>
               <button data-testid="export-button" disabled={!canExport} onClick={handleExport}
                 className="bg-orange-700 hover:bg-orange-600 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm px-3 py-1 rounded">Export</button>
