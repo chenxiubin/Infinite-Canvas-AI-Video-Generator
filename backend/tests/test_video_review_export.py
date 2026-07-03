@@ -220,6 +220,62 @@ class TestEdgeCases(unittest.TestCase):
         except Exception as e:
             self.fail(f"init_db raised {e}")
 
+    def test_archived_batch_blocks_merge(self):
+        import sqlite3
+        bid, iid, _ = _ready_batch(self.client, prefix="ARCM")
+        self.client.post(f"/api/v1/video-batches/{bid}/generate", json={})
+        from main import DB_FILE
+        conn = sqlite3.connect(DB_FILE)
+        conn.execute("UPDATE batch_tasks SET status='archived' WHERE id=?", (bid,))
+        conn.commit(); conn.close()
+        r = self.client.post(f"/api/v1/video-instances/{iid}/merge-preview", json={})
+        self.assertEqual(r.status_code, 400)
+
+    def test_archived_batch_blocks_export(self):
+        import sqlite3
+        bid, iid, _ = _ready_batch(self.client, prefix="ARCE")
+        self.client.post(f"/api/v1/video-batches/{bid}/generate", json={})
+        self.client.post(f"/api/v1/video-instances/{iid}/merge-preview", json={})
+        self.client.post(f"/api/v1/video-instances/{iid}/review", json={"action":"approve"})
+        from main import DB_FILE
+        conn = sqlite3.connect(DB_FILE)
+        conn.execute("UPDATE batch_tasks SET status='archived' WHERE id=?", (bid,))
+        conn.commit(); conn.close()
+        r = self.client.post(f"/api/v1/video-instances/{iid}/export", json={})
+        self.assertEqual(r.status_code, 400)
+
+
+class TestJobQueries(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.client = TestClient(app)
+        cls.bid, cls.iid, cls.pid = _ready_batch(cls.client, prefix="JOBQ")
+        cls.client.post(f"/api/v1/video-batches/{cls.bid}/generate", json={})
+        mr = cls.client.post(f"/api/v1/video-instances/{cls.iid}/merge-preview", json={})
+        cls.merge_job_id = mr.json()["merge_job_id"]
+        cls.client.post(f"/api/v1/video-instances/{cls.iid}/review", json={"action":"approve"})
+        er = cls.client.post(f"/api/v1/video-instances/{cls.iid}/export", json={})
+        cls.export_job_id = er.json()["export_job_id"]
+
+    def test_get_merge_job_success(self):
+        r = self.client.get(f"/api/v1/video-merge-jobs/{self.merge_job_id}")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["status"], "success")
+        self.assertIn("/mock-previews/", r.json()["output_preview_url"])
+
+    def test_get_export_job_success(self):
+        r = self.client.get(f"/api/v1/export-jobs/{self.export_job_id}")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["status"], "success")
+        self.assertIn("/mock-exports/", r.json()["final_video_url"])
+
+    def test_list_instance_reviews(self):
+        r = self.client.get(f"/api/v1/video-instances/{self.iid}/reviews")
+        self.assertEqual(r.status_code, 200)
+        reviews = r.json()["reviews"]
+        self.assertGreaterEqual(len(reviews), 6)  # 6 nodes approved
+        self.assertEqual(reviews[0]["action"], "approve")
+
 
 if __name__ == "__main__":
     unittest.main()
