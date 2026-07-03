@@ -11,6 +11,7 @@
     "test:backend": "python -m unittest discover -s ../backend/tests",
     "test:e2e": "npx playwright test --grep \"G1|G2|H1|H2|H3|I1|I2|I3|I4|J1|J3|J4|K1|K2-a\"",
     "test:e2e:mvp3": "npx playwright test --grep \"M3-\"",
+    "test:e2e:mvp3:canvas": "npx playwright test --grep \"M3-Canvas\"",
     "test": "npm run test:backend && npm run test:e2e"
   },
   "dependencies": {

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as api from '../api/mvp3';
+import { ProductionCanvasView } from './ProductionCanvasView';
 
 type NodeStatus = 'pending' | 'running' | 'success' | 'failed';
 
@@ -28,6 +29,7 @@ export const ProductionWorkbench: React.FC = () => {
   const [batchId, setBatchId] = useState('');
   const [instance, setInstance] = useState<InstanceData | null>(null);
   const [nodes, setNodes] = useState<NodeItem[]>([]);
+  const [viewMode, setViewMode] = useState<'form' | 'canvas'>('form');
 
   // Refs for stable closure access (avoid stale React state in handlers)
   const batchIdRef = useRef('');
@@ -133,9 +135,24 @@ export const ProductionWorkbench: React.FC = () => {
   return (
     <div data-testid="mvp3-workbench" className="min-h-screen bg-[#0f172a] text-gray-200 p-6 font-sans">
       <h1 className="text-xl font-bold mb-1">MVP-3 视频生产工作台</h1>
+      <div className="flex gap-2 mb-4">
+        <button data-testid="workbench-tab-form" onClick={() => setViewMode('form')}
+          className={`text-xs px-3 py-1 rounded ${viewMode === 'form' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400'}`}>工作台</button>
+        <button data-testid="workbench-tab-canvas" onClick={() => setViewMode('canvas')}
+          className={`text-xs px-3 py-1 rounded ${viewMode === 'canvas' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400'}`}>画布视图</button>
+      </div>
       {loading && <div className="text-blue-400 text-xs mb-2">{loading}</div>}
       {error && <div data-testid="error-message" className="bg-red-900/50 border border-red-500/50 text-red-300 px-4 py-3 rounded mb-4 text-sm">{error}<button onClick={clearError} className="ml-4 text-red-400">x</button></div>}
 
+      {viewMode === 'canvas' && (
+        <ProductionCanvasView instance={instance} nodes={nodes} onRefresh={() => {
+          if (instanceRef.current) {
+            api.getVideoInstance(instanceRef.current.instance_id).then(i => { setInstance(i); setNodes(i.nodes || []); }).catch(() => {});
+          }
+        }} />
+      )}
+
+      {viewMode === 'form' && (<>
       {/* 1. Product */}
       <section className="bg-[#1e293b] border border-white/10 rounded-lg p-4 mb-4">
         <h2 className="text-sm font-semibold mb-3">1. 产品素材包</h2>
@@ -210,6 +227,7 @@ export const ProductionWorkbench: React.FC = () => {
           </div>
         </section>
       )}
+      </>)}
     </div>
   );
 };
