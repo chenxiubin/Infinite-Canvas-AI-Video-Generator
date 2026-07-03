@@ -220,10 +220,18 @@ def run_mock_generation_for_node(
         cursor.execute(
             """UPDATE video_instance_nodes
             SET status = 'success', job_id = ?, video_url = ?, cover_url = ?,
-                retry_count = COALESCE(retry_count, 0) + 1, updated_at = ?, completed_at = ?
+                retry_count = COALESCE(retry_count, 0) + 1,
+                review_status = CASE WHEN review_status != 'not_required' THEN 'pending' ELSE review_status END,
+                updated_at = ?, completed_at = ?
             WHERE id = ?""",
             (job_id, video_url, cover_url, now, now, node_id),
         )
+        # Reset delivery state on the instance (invalidate old preview/export)
+        try:
+            from .video_review_export import reset_instance_delivery_after_node_regenerate
+        except ImportError:
+            from video_review_export import reset_instance_delivery_after_node_regenerate
+        reset_instance_delivery_after_node_regenerate(cursor, node["instance_id"])
         cursor.execute(
             """UPDATE video_generation_jobs
             SET status = 'success', output_video_url = ?, output_cover_url = ?,

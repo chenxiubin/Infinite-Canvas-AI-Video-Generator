@@ -26,6 +26,13 @@ try:
         apply_instance_status, apply_batch_status,
         assert_testing_force_allowed,
     )
+    from .video_review_export import (
+        all_nodes_success, can_merge_preview, run_mock_merge_preview,
+        recompute_instance_review_status, apply_instance_review_status,
+        create_review_record, review_node, review_instance_nodes,
+        can_export_instance, run_mock_export,
+        reset_instance_delivery_after_node_regenerate,
+    )
 except ImportError:
     from asset_roles import (
         infer_asset_role, canonicalize_role, CANONICAL_ROLES,
@@ -40,6 +47,13 @@ except ImportError:
         recompute_instance_status, recompute_batch_status,
         apply_instance_status, apply_batch_status,
         assert_testing_force_allowed,
+    )
+    from video_review_export import (
+        all_nodes_success, can_merge_preview, run_mock_merge_preview,
+        recompute_instance_review_status, apply_instance_review_status,
+        create_review_record, review_node, review_instance_nodes,
+        can_export_instance, run_mock_export,
+        reset_instance_delivery_after_node_regenerate,
     )
 
 # Initialize FastAPI App
@@ -365,7 +379,87 @@ def init_db():
         try:
             cursor.execute(f"ALTER TABLE video_instance_nodes ADD COLUMN {col} {col_def}")
         except sqlite3.OperationalError:
-            pass  # column already exists
+            pass
+
+    # Sprint 4: review + delivery columns on video_instance_nodes
+    for col, col_def in [
+        ("review_status", "TEXT DEFAULT 'not_required'"),
+        ("review_reason", "TEXT DEFAULT ''"),
+        ("reviewed_at", "REAL"),
+        ("requires_review", "INTEGER DEFAULT 1"),
+    ]:
+        try:
+            cursor.execute(f"ALTER TABLE video_instance_nodes ADD COLUMN {col} {col_def}")
+        except sqlite3.OperationalError:
+            pass
+
+    # Sprint 4: delivery columns on video_instances
+    for col, col_def in [
+        ("draft_preview_url", "TEXT"),
+        ("draft_cover_url", "TEXT"),
+        ("merge_status", "TEXT DEFAULT 'not_started'"),
+        ("review_status", "TEXT DEFAULT 'not_ready'"),
+        ("export_status", "TEXT DEFAULT 'not_started'"),
+        ("final_video_url", "TEXT"),
+        ("reviewed_at", "REAL"),
+        ("exported_at", "REAL"),
+    ]:
+        try:
+            cursor.execute(f"ALTER TABLE video_instances ADD COLUMN {col} {col_def}")
+        except sqlite3.OperationalError:
+            pass
+
+    # 16. Video Merge Jobs (MVP-3 Sprint 4)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS video_merge_jobs (
+        id TEXT PRIMARY KEY,
+        batch_id TEXT NOT NULL,
+        instance_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'queued',
+        output_preview_url TEXT,
+        output_cover_url TEXT,
+        error_message TEXT,
+        attempt_no INTEGER DEFAULT 1,
+        created_at REAL NOT NULL,
+        started_at REAL,
+        completed_at REAL
+    )
+    """)
+
+    # 17. Review Records (MVP-3 Sprint 4)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS review_records (
+        id TEXT PRIMARY KEY,
+        target_type TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        batch_id TEXT NOT NULL,
+        instance_id TEXT NOT NULL,
+        node_id TEXT,
+        action TEXT NOT NULL,
+        previous_status TEXT DEFAULT '',
+        new_status TEXT DEFAULT '',
+        reason TEXT DEFAULT '',
+        reviewer TEXT DEFAULT 'local_user',
+        created_at REAL NOT NULL
+    )
+    """)
+
+    # 18. Export Jobs (MVP-3 Sprint 4)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS export_jobs (
+        id TEXT PRIMARY KEY,
+        batch_id TEXT NOT NULL,
+        instance_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'queued',
+        draft_preview_url TEXT DEFAULT '',
+        final_video_url TEXT,
+        error_message TEXT,
+        attempt_no INTEGER DEFAULT 1,
+        created_at REAL NOT NULL,
+        started_at REAL,
+        completed_at REAL
+    )
+    """)
 
     conn.commit()
 
@@ -2115,6 +2209,12 @@ def get_video_instance(instance_id: str, db: sqlite3.Connection = Depends(get_db
         "sku": inst["sku"],
         "template_id": inst["template_id"],
         "status": inst["status"],
+        "draft_preview_url": inst["draft_preview_url"],
+        "draft_cover_url": inst["draft_cover_url"],
+        "merge_status": inst["merge_status"],
+        "review_status": inst["review_status"],
+        "export_status": inst["export_status"],
+        "final_video_url": inst["final_video_url"],
         "product": {
             "product_id": product["id"],
             "sku": product["sku"],
@@ -2413,6 +2513,181 @@ def list_node_jobs(node_id: str, db: sqlite3.Connection = Depends(get_db)):
         for r in cursor.fetchall()
     ]
     return {"node_id": node_id, "jobs": jobs}
+
+
+# ==================== MVP-3 Sprint 4: Preview, Review, Export ====================
+
+# --- Schemas ---
+
+class MergePreviewRequest(BaseModel):
+    force: bool = False
+
+class NodeReviewRequest(BaseModel):
+    action: str  # "approve" | "reject"
+    reason: str = ""
+
+class InstanceReviewRequest(BaseModel):
+    action: str
+    reason: str = ""
+
+class ExportRequest(BaseModel):
+    force: bool = False
+
+# --- Merge Preview ---
+
+@app.post("/api/v1/video-instances/{instance_id}/merge-preview")
+def create_merge_preview(instance_id: str, req: MergePreviewRequest, db: sqlite3.Connection = Depends(get_db)):
+    cursor = db.cursor()
+    ok, reason = can_merge_preview(cursor, instance_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail=reason)
+
+    # Check if already merged
+    cursor.execute("SELECT * FROM video_instances WHERE id = ?", (instance_id,))
+    inst = cursor.fetchone()
+    if inst["draft_preview_url"] and not req.force:
+        return {
+            "instance_id": instance_id,
+            "merge_status": inst["merge_status"],
+            "draft_preview_url": inst["draft_preview_url"],
+            "draft_cover_url": inst["draft_cover_url"],
+            "skipped": True,
+            "review_status": inst["review_status"],
+        }
+
+    result = run_mock_merge_preview(cursor, instance_id, inst["batch_id"])
+    db.commit()
+    return {
+        "instance_id": instance_id,
+        "merge_status": result["status"],
+        "draft_preview_url": result["draft_preview_url"],
+        "draft_cover_url": result["draft_cover_url"],
+        "merge_job_id": result["merge_job_id"],
+        "skipped": False,
+        "review_status": "pending",
+    }
+
+
+# --- Node Review ---
+
+@app.post("/api/v1/video-nodes/{node_id}/review")
+def review_video_node(node_id: str, req: NodeReviewRequest, db: sqlite3.Connection = Depends(get_db)):
+    cursor = db.cursor()
+    try:
+        result = review_node(cursor, node_id, req.action, req.reason)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    db.commit()
+    return result
+
+
+# --- Instance Batch Review ---
+
+@app.post("/api/v1/video-instances/{instance_id}/review")
+def review_video_instance(instance_id: str, req: InstanceReviewRequest, db: sqlite3.Connection = Depends(get_db)):
+    cursor = db.cursor()
+    cursor.execute("SELECT id FROM video_instances WHERE id = ?", (instance_id,))
+    if not cursor.fetchone():
+        raise HTTPException(status_code=404, detail="Instance not found")
+    try:
+        result = review_instance_nodes(cursor, instance_id, req.action, req.reason)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    db.commit()
+    return result
+
+
+# --- Review Records ---
+
+@app.get("/api/v1/video-instances/{instance_id}/reviews")
+def list_instance_reviews(instance_id: str, db: sqlite3.Connection = Depends(get_db)):
+    cursor = db.cursor()
+    cursor.execute("SELECT id FROM video_instances WHERE id = ?", (instance_id,))
+    if not cursor.fetchone():
+        raise HTTPException(status_code=404, detail="Instance not found")
+    cursor.execute(
+        "SELECT * FROM review_records WHERE instance_id = ? ORDER BY created_at DESC",
+        (instance_id,),
+    )
+    reviews = [
+        {
+            "review_id": r["id"],
+            "target_type": r["target_type"],
+            "target_id": r["target_id"],
+            "action": r["action"],
+            "previous_status": r["previous_status"],
+            "new_status": r["new_status"],
+            "reason": r["reason"],
+            "reviewer": r["reviewer"],
+            "created_at": r["created_at"],
+        }
+        for r in cursor.fetchall()
+    ]
+    return {"instance_id": instance_id, "reviews": reviews}
+
+
+# --- Export ---
+
+@app.post("/api/v1/video-instances/{instance_id}/export")
+def export_video_instance(instance_id: str, req: ExportRequest, db: sqlite3.Connection = Depends(get_db)):
+    cursor = db.cursor()
+    ok, reason = can_export_instance(cursor, instance_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail=reason)
+
+    cursor.execute("SELECT * FROM video_instances WHERE id = ?", (instance_id,))
+    inst = cursor.fetchone()
+    if inst["export_status"] == "success" and not req.force:
+        return {
+            "instance_id": instance_id,
+            "export_status": inst["export_status"],
+            "final_video_url": inst["final_video_url"],
+            "skipped": True,
+        }
+
+    result = run_mock_export(cursor, instance_id, inst["batch_id"])
+    db.commit()
+    return {
+        "instance_id": instance_id,
+        "export_status": result["status"],
+        "final_video_url": result["final_video_url"],
+        "export_job_id": result["export_job_id"],
+        "skipped": False,
+    }
+
+
+# --- Job Queries ---
+
+@app.get("/api/v1/export-jobs/{export_job_id}")
+def get_export_job(export_job_id: str, db: sqlite3.Connection = Depends(get_db)):
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM export_jobs WHERE id = ?", (export_job_id,))
+    job = cursor.fetchone()
+    if not job:
+        raise HTTPException(status_code=404, detail="Export job not found")
+    return {
+        "export_job_id": job["id"],
+        "instance_id": job["instance_id"],
+        "status": job["status"],
+        "final_video_url": job["final_video_url"],
+        "attempt_no": job["attempt_no"],
+    }
+
+
+@app.get("/api/v1/video-merge-jobs/{merge_job_id}")
+def get_merge_job(merge_job_id: str, db: sqlite3.Connection = Depends(get_db)):
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM video_merge_jobs WHERE id = ?", (merge_job_id,))
+    job = cursor.fetchone()
+    if not job:
+        raise HTTPException(status_code=404, detail="Merge job not found")
+    return {
+        "merge_job_id": job["id"],
+        "instance_id": job["instance_id"],
+        "status": job["status"],
+        "output_preview_url": job["output_preview_url"],
+        "output_cover_url": job["output_cover_url"],
+    }
 
 
 if __name__ == "__main__":
