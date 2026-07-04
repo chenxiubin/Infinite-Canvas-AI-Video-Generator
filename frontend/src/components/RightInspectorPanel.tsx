@@ -140,7 +140,7 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
                   return sfAsset ? (
                     <div data-testid="start-frame-preview" className="flex items-center gap-2 bg-[#0a0f1a] rounded-lg p-1.5">
                       <img src={sfAsset.url} className="w-10 h-10 rounded object-cover" />
-                      <div className="flex-1 min-w-0 text-[10px] text-green-400">首帧已绑定</div>
+                      <div className="flex-1 min-w-0"><div className="text-[10px] text-green-400">首帧已绑定</div><div className="text-[8px] text-green-600">已持久化 · 图生视频首帧输入</div></div>
                       <button onClick={() => onBindShotFrame(node.shot_key, 'startFrame', null)}
                         className="text-red-400 text-[9px] hover:underline">解绑</button>
                     </div>
@@ -169,7 +169,7 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
                     </div>
                   ) : (
                     <div className="space-y-1">
-                      <div className="text-[10px] text-gray-500">尾帧图（可选）</div>
+                      <div className="text-[10px] text-gray-500">尾帧图（可选 · 本地暂存）</div>
                       {assets && assets.length > 0 ? (
                         <select data-testid="bind-end-frame-select" value="" onChange={e => { if (e.target.value) onBindShotFrame(node.shot_key, 'endFrame', e.target.value); }}
                           className="bg-[#0a0f1a] border border-white/10 rounded px-2 py-1 text-gray-300 text-[10px] w-full">
@@ -185,7 +185,7 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
                   const refAssets = (selectedBinding?.referenceAssetIds || []).map(id => getBoundAsset?.(id)).filter(Boolean) as WorkbenchAsset[];
                   return refAssets.length > 0 ? (
                     <div data-testid="reference-image-preview" className="space-y-1">
-                      <div className="text-[10px] text-green-400">参考图已绑定 ({refAssets.length}张)</div>
+                      <div className="text-[10px] text-green-400">参考图已绑定（本地暂存） ({refAssets.length}张)</div>
                       {refAssets.map(a => (
                         <div key={a.id} className="flex items-center gap-2 bg-[#0a0f1a] rounded-lg p-1.5">
                           <img src={a.url} className="w-8 h-8 rounded object-cover" />

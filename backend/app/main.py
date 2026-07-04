@@ -1857,6 +1857,62 @@ def update_asset_role(product_id: str, asset_id: str, req: AssetRoleUpdateReques
     }
 
 
+# --- Video Instance Node Asset Binding ---
+
+class VideoNodeBindRequest(BaseModel):
+    asset_id: str
+    source_type: str
+    asset_role: Optional[str] = None
+
+@app.put("/api/v1/video-instances/{instance_id}/nodes/{shot_key}/bind")
+def bind_video_node_asset(instance_id: str, shot_key: str, req: VideoNodeBindRequest, db: sqlite3.Connection = Depends(get_db)):
+    cursor = db.cursor()
+    cursor.execute("SELECT id, product_id FROM video_instances WHERE id = ?", (instance_id,))
+    inst = cursor.fetchone()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Video instance not found")
+
+    cursor.execute(
+        "SELECT id, product_id FROM video_instance_nodes WHERE instance_id = ? AND shot_key = ?",
+        (instance_id, shot_key),
+    )
+    node = cursor.fetchone()
+    if not node:
+        raise HTTPException(status_code=404, detail=f"Node '{shot_key}' not found in instance '{instance_id}'")
+
+    if req.asset_role and req.asset_role not in ("start_frame",):
+        raise HTTPException(status_code=400, detail=f"Unsupported asset_role: '{req.asset_role}'. Only 'start_frame' is supported for binding.")
+
+    role_value = req.asset_role
+    cursor.execute(
+        "SELECT role_key FROM product_assets WHERE id = ? AND product_id = ?",
+        (req.asset_id, node["product_id"]),
+    )
+    asset = cursor.fetchone()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Product asset not found")
+    if not role_value:
+        role_value = asset["role_key"]
+
+    now = time.time()
+    cursor.execute(
+        """UPDATE video_instance_nodes
+           SET bound_asset_id = ?, bound_asset_role = ?, bound_asset_source = ?, status = 'pending', updated_at = ?
+           WHERE instance_id = ? AND shot_key = ?""",
+        (req.asset_id, role_value, req.source_type, now, instance_id, shot_key),
+    )
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=500, detail="Failed to update node binding")
+    db.commit()
+    return {
+        "status": "success",
+        "instance_id": instance_id,
+        "shot_key": shot_key,
+        "bound_asset_id": req.asset_id,
+        "bound_asset_role": role_value,
+    }
+
+
 @app.get("/api/v1/products/{product_id}/checklist")
 def get_product_checklist(product_id: str, db: sqlite3.Connection = Depends(get_db)):
     cursor = db.cursor()

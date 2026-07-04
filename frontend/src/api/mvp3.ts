@@ -49,6 +49,20 @@ export const getVideoBatch = (id: string) =>
 export const generateVideoBatch = (id: string) =>
   request(`/api/v1/video-batches/${id}/generate`, { method: 'POST', body: JSON.stringify({}) });
 
+// Asset file upload (multipart)
+export const uploadAssetFile = async (file: File): Promise<{ asset_id: string; filename: string; url: string; role_key: string }> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  const resp = await fetch('/api/v1/assets/upload', { method: 'POST', body: formData });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) { const msg = data.detail || resp.statusText; throw new Error(msg); }
+  return data;
+};
+
+// Video instance node asset binding
+export const bindAssetToVideoNode = (instanceId: string, shotKey: string, body: { asset_id: string; source_type: string; asset_role?: string }) =>
+  request(`/api/v1/video-instances/${instanceId}/nodes/${shotKey}/bind`, { method: 'PUT', body: JSON.stringify(body) });
+
 // Video Instances
 export const getVideoInstance = (id: string) =>
   request(`/api/v1/video-instances/${id}`);

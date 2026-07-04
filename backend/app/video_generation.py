@@ -219,7 +219,7 @@ def run_mock_generation_for_node(
         from model_gateway import submit_generation as gateway_submit
 
     gateway_req = {
-        "node_id": node_id, "image_url": bound_asset_url,
+        "node_id": node_id, "image_url": bound_asset_url, "start_frame_url": bound_asset_url,
         "prompt": node.get("prompt", ""), "duration_seconds": node.get("duration_seconds", 4),
         "shot_key": shot_key, "model_adapter": model_adapter,
         "model_name": model_name_override or ("mock_image_to_video" if model_adapter == "mock" else None),

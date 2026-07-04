@@ -144,5 +144,30 @@ class TestGatewayAlterTables(unittest.TestCase):
             self.fail(f"init_db failed: {e}")
 
 
+class TestMockAdapterEcho(unittest.TestCase):
+    """Verify MockAdapter echoes image input and gateway_req payload."""
+
+    def test_mock_adapter_echoes_image_url_in_raw_response(self):
+        from model_gateway import submit_generation
+        result = submit_generation({"node_id": "test_n1", "image_url": "/mock/test.jpg", "prompt": "test prompt", "duration_seconds": 5})
+        self.assertIn("raw_response_summary", result)
+        rs = result["raw_response_summary"]
+        self.assertEqual(rs.get("image_url"), "/mock/test.jpg")
+        self.assertEqual(rs.get("prompt"), "test prompt")
+        self.assertEqual(rs.get("duration_seconds"), 5)
+        self.assertTrue(rs.get("mock"))
+
+    def test_start_frame_url_in_gateway_req(self):
+        from model_gateway import submit_generation
+        result = submit_generation({"node_id": "test_n2", "image_url": "/mock/img.jpg", "start_frame_url": "/mock/sf.jpg", "prompt": "p", "duration_seconds": 4})
+        self.assertEqual(result["raw_response_summary"]["image_url"], "/mock/img.jpg")
+
+    def test_gateway_req_empty_image_url_no_error(self):
+        from model_gateway import submit_generation
+        result = submit_generation({"node_id": "test_n3", "image_url": "", "prompt": "", "duration_seconds": 4})
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["raw_response_summary"]["image_url"], "")
+
+
 if __name__ == "__main__":
     unittest.main()

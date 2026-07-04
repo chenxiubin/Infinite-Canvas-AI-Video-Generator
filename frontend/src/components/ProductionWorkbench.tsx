@@ -10,7 +10,7 @@ type NodeStatus = 'pending' | 'running' | 'success' | 'failed';
 interface NodeItem { node_id: string; shot_key: string; status: NodeStatus; [key: string]: any }
 interface InstanceData { instance_id: string; status: string; draft_preview_url?: string; review_status?: string; export_status?: string; final_video_url?: string; nodes?: NodeItem[] }
 
-interface WorkbenchAsset { id: string; filename: string; url: string; role: string; createdAt: number; }
+interface WorkbenchAsset { id: string; filename: string; url: string; role: string; createdAt: number; backendAssetId?: string; }
 interface ShotFrameBinding { shotKey: string; startFrameAssetId?: string; endFrameAssetId?: string; referenceAssetIds?: string[]; }
 
 export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = ({ onSwitchToLegacy }) => {
@@ -72,17 +72,29 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
   const handleApproveAll = async () => { const i=instanceRef.current;if(!i)return;try{clearError();await api.reviewInstance(i.instance_id,'approve');await loadInstance(i.instance_id);}catch(e){showError(e);} };
   const handleExport = async () => { const i=instanceRef.current;if(!i)return;try{clearError();await api.exportInstance(i.instance_id);await loadInstance(i.instance_id);}catch(e){showError(e);} };
 
-  const handleUploadAssets = (files: FileList) => {
-    const newAssets: WorkbenchAsset[] = Array.from(files).map(f => ({
-      id: `asset_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
-      filename: f.name, url: URL.createObjectURL(f), role: 'reference', createdAt: Date.now(),
-    }));
-    setAssets(prev => [...prev, ...newAssets]);
+  const handleUploadAssets = async (files: FileList) => {
+    for (const f of Array.from(files)) {
+      try {
+        const blobUrl = URL.createObjectURL(f);
+        const localId = `asset_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+        setAssets(prev => [...prev, { id: localId, filename: f.name, url: blobUrl, role: 'reference', createdAt: Date.now() }]);
+        const result = await api.uploadAssetFile(f);
+        setAssets(prev => prev.map(a => a.id === localId ? { ...a, url: result.url, backendAssetId: result.asset_id } : a));
+        URL.revokeObjectURL(blobUrl);
+      } catch (e: any) { setError(e?.message || '上传失败'); }
+    }
   };
   const handleUpdateAssetRole = (assetId: string, role: string) => {
     setAssets(prev => prev.map(a => a.id === assetId ? { ...a, role } : a));
   };
-  const handleBindShotFrame = (shotKey: string, frameType: 'startFrame' | 'endFrame' | 'reference', assetId: string | null) => {
+  const handleBindShotFrame = async (shotKey: string, frameType: 'startFrame' | 'endFrame' | 'reference', assetId: string | null) => {
+    if (frameType === 'startFrame' && assetId && instance?.instance_id) {
+      const asset = assets.find(a => a.id === assetId);
+      if (asset?.backendAssetId) {
+        try { await api.bindAssetToVideoNode(instance.instance_id, shotKey, { asset_id: asset.backendAssetId, source_type: 'uploaded', asset_role: 'start_frame' }); }
+        catch (e: any) { setError(e?.message || '绑定失败'); return; }
+      }
+    }
     setShotBindings(prev => {
       const existing = prev.find(b => b.shotKey === shotKey);
       if (!existing) {

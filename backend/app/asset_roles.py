@@ -12,7 +12,7 @@ import re
 from typing import Tuple
 
 # Canonical role keys for MVP-3
-CANONICAL_ROLES = {"main", "detail1", "detail2", "scene", "motion", "brand"}
+CANONICAL_ROLES = {"main", "detail1", "detail2", "scene", "motion", "brand", "start_frame", "end_frame", "reference_image"}
 
 # Old-to-new role_key migration mapping (kept for input compatibility)
 _ROLE_MIGRATION = {

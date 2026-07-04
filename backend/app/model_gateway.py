@@ -51,7 +51,7 @@ class MockAdapter(ModelAdapter):
             "model_name": "mock_image_to_video",
             "model_version": "mock-v1",
             "cost_estimate": 0.0,
-            "raw_response_summary": {"status": "success", "mock": True},
+            "raw_response_summary": {"status": "success", "mock": True, "image_url": request.get("image_url", ""), "prompt": request.get("prompt", ""), "duration_seconds": request.get("duration_seconds", 4)},
         }
 
     def poll(self, provider_job_id: str) -> dict:
