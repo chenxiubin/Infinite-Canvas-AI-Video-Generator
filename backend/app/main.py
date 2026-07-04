@@ -1939,6 +1939,154 @@ def bind_video_node_asset(instance_id: str, shot_key: str, req: VideoNodeBindReq
     }
 
 
+# --- Video Node Asset Binding CRUD ---
+
+class BindingUpsertRequest(BaseModel):
+    asset_id: str
+    source: str = "manual"
+
+
+class ReferenceImageCreateRequest(BaseModel):
+    asset_id: str
+    source: str = "manual"
+    sort_order: Optional[int] = None
+
+
+def _serialize_binding(row: sqlite3.Row) -> dict:
+    return {
+        "id": row["id"], "instance_id": row["instance_id"], "node_id": row["node_id"],
+        "shot_key": row["shot_key"], "binding_type": row["binding_type"],
+        "asset_id": row["asset_id"], "asset_role": row["asset_role"],
+        "source": row["source"], "sort_order": row["sort_order"],
+        "created_at": row["created_at"], "updated_at": row["updated_at"],
+    }
+
+
+def _resolve_asset_url(cursor, asset_id: str) -> str:
+    cursor.execute("SELECT file_url FROM product_assets WHERE id = ?", (asset_id,))
+    row = cursor.fetchone()
+    return row["file_url"] if row else ""
+
+
+def _validate_instance_and_node(cursor, instance_id: str, shot_key: str):
+    cursor.execute("SELECT id FROM video_instances WHERE id = ?", (instance_id,))
+    if not cursor.fetchone():
+        raise HTTPException(status_code=404, detail="Video instance not found")
+    cursor.execute("SELECT id FROM video_instance_nodes WHERE instance_id = ? AND shot_key = ?", (instance_id, shot_key))
+    if not cursor.fetchone():
+        raise HTTPException(status_code=404, detail=f"Node '{shot_key}' not found in instance '{instance_id}'")
+
+
+def _validate_asset(cursor, asset_id: str):
+    cursor.execute("SELECT id FROM product_assets WHERE id = ?", (asset_id,))
+    if not cursor.fetchone():
+        raise HTTPException(status_code=404, detail="Product asset not found")
+
+
+@app.get("/api/v1/video-instances/{instance_id}/nodes/{shot_key}/bindings")
+def list_node_bindings(instance_id: str, shot_key: str, db: sqlite3.Connection = Depends(get_db)):
+    cursor = db.cursor()
+    _validate_instance_and_node(cursor, instance_id, shot_key)
+    cursor.execute(
+        "SELECT * FROM video_node_asset_bindings WHERE instance_id = ? AND shot_key = ? ORDER BY binding_type, sort_order",
+        (instance_id, shot_key),
+    )
+    rows = cursor.fetchall()
+    bindings = [_serialize_binding(r) for r in rows]
+    for b in bindings:
+        b["asset_url"] = _resolve_asset_url(cursor, b["asset_id"])
+    result = {"shot_key": shot_key, "start_frame": None, "end_frame": None, "reference_images": []}
+    for b in bindings:
+        if b["binding_type"] == "start_frame": result["start_frame"] = b
+        elif b["binding_type"] == "end_frame": result["end_frame"] = b
+        elif b["binding_type"] == "reference_image": result["reference_images"].append(b)
+    return result
+
+
+def _upsert_binding(cursor, instance_id: str, shot_key: str, node_id: str, binding_type: str, asset_id: str, source: str):
+    now = time.time()
+    cursor.execute("SELECT id FROM video_node_asset_bindings WHERE instance_id=? AND shot_key=? AND binding_type=?",
+                   (instance_id, shot_key, binding_type))
+    existing = cursor.fetchone()
+    if existing:
+        cursor.execute(
+            "UPDATE video_node_asset_bindings SET asset_id=?, source=?, updated_at=? WHERE id=?",
+            (asset_id, source, now, existing["id"]),
+        )
+        return existing["id"]
+    new_id = f"vnab_{uuid.uuid4().hex[:8]}"
+    cursor.execute(
+        """INSERT INTO video_node_asset_bindings (id, instance_id, node_id, shot_key, binding_type, asset_id, asset_role, source, sort_order, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)""",
+        (new_id, instance_id, node_id, shot_key, binding_type, asset_id, binding_type, source, now, now),
+    )
+    return new_id
+
+
+@app.put("/api/v1/video-instances/{instance_id}/nodes/{shot_key}/bindings/start_frame")
+def upsert_start_frame(instance_id: str, shot_key: str, req: BindingUpsertRequest, db: sqlite3.Connection = Depends(get_db)):
+    cursor = db.cursor()
+    _validate_instance_and_node(cursor, instance_id, shot_key)
+    _validate_asset(cursor, req.asset_id)
+    cursor.execute("SELECT id FROM video_instance_nodes WHERE instance_id=? AND shot_key=?", (instance_id, shot_key))
+    node = cursor.fetchone()
+    binding_id = _upsert_binding(cursor, instance_id, shot_key, node["id"], "start_frame", req.asset_id, req.source)
+    db.commit()
+    return {"status": "success", "binding_id": binding_id, "binding_type": "start_frame"}
+
+
+@app.put("/api/v1/video-instances/{instance_id}/nodes/{shot_key}/bindings/end_frame")
+def upsert_end_frame(instance_id: str, shot_key: str, req: BindingUpsertRequest, db: sqlite3.Connection = Depends(get_db)):
+    cursor = db.cursor()
+    _validate_instance_and_node(cursor, instance_id, shot_key)
+    _validate_asset(cursor, req.asset_id)
+    cursor.execute("SELECT id FROM video_instance_nodes WHERE instance_id=? AND shot_key=?", (instance_id, shot_key))
+    node = cursor.fetchone()
+    binding_id = _upsert_binding(cursor, instance_id, shot_key, node["id"], "end_frame", req.asset_id, req.source)
+    db.commit()
+    return {"status": "success", "binding_id": binding_id, "binding_type": "end_frame"}
+
+
+@app.post("/api/v1/video-instances/{instance_id}/nodes/{shot_key}/bindings/reference_images")
+def add_reference_image(instance_id: str, shot_key: str, req: ReferenceImageCreateRequest, db: sqlite3.Connection = Depends(get_db)):
+    cursor = db.cursor()
+    _validate_instance_and_node(cursor, instance_id, shot_key)
+    _validate_asset(cursor, req.asset_id)
+    cursor.execute("SELECT id FROM video_instance_nodes WHERE instance_id=? AND shot_key=?", (instance_id, shot_key))
+    node = cursor.fetchone()
+    if req.sort_order is None:
+        cursor.execute(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM video_node_asset_bindings WHERE instance_id=? AND shot_key=? AND binding_type='reference_image'",
+            (instance_id, shot_key),
+        )
+        sort_order = cursor.fetchone()[0]
+    else:
+        sort_order = req.sort_order
+    now = time.time()
+    new_id = f"vnab_{uuid.uuid4().hex[:8]}"
+    cursor.execute(
+        """INSERT INTO video_node_asset_bindings (id, instance_id, node_id, shot_key, binding_type, asset_id, asset_role, source, sort_order, created_at, updated_at)
+           VALUES (?, ?, ?, ?, 'reference_image', ?, 'reference_image', ?, ?, ?, ?)""",
+        (new_id, instance_id, node["id"], shot_key, req.asset_id, req.source, sort_order, now, now),
+    )
+    db.commit()
+    return {"status": "success", "binding_id": new_id, "binding_type": "reference_image", "sort_order": sort_order}
+
+
+@app.delete("/api/v1/video-instances/{instance_id}/nodes/{shot_key}/bindings/{binding_id}")
+def delete_node_binding(instance_id: str, shot_key: str, binding_id: str, db: sqlite3.Connection = Depends(get_db)):
+    cursor = db.cursor()
+    cursor.execute(
+        "SELECT id FROM video_node_asset_bindings WHERE id=? AND instance_id=? AND shot_key=?",
+        (binding_id, instance_id, shot_key),
+    )
+    if not cursor.fetchone():
+        raise HTTPException(status_code=404, detail="Binding not found")
+    cursor.execute("DELETE FROM video_node_asset_bindings WHERE id=?", (binding_id,))
+    db.commit()
+    return {"status": "deleted", "binding_id": binding_id}
+
+
 @app.get("/api/v1/products/{product_id}/checklist")
 def get_product_checklist(product_id: str, db: sqlite3.Connection = Depends(get_db)):
     cursor = db.cursor()

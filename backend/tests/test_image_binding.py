@@ -34,6 +34,7 @@ class TestImageBindingEndpoint(unittest.TestCase):
     def setUpClass(cls):
         cls.client = TestClient(app)
 
+    # ==== Schema tests (3C-1) ====
     def test_a_bind_start_frame_success(self):
         """PUT /api/v1/video-instances/{iid}/nodes/{shot_key}/bind with start_frame asset"""
         bid, iid, pid = _ready_batch(self.client, "BIND")
@@ -267,9 +268,134 @@ class TestImageBindingEndpoint(unittest.TestCase):
 
     def test_h_old_endpoint_unaffected(self):
         """Old PUT /api/v1/instances/{id}/nodes/{key}/asset-binding still works"""
-        # Legacy canvas test via old endpoint remains functional
         r = self.client.get("/api/v1/video-templates?product_type=desk_calendar")
         self.assertEqual(r.status_code, 200)
-        # Asset_roles now include start_frame
         r = self.client.get("/api/v1/products")
         self.assertEqual(r.status_code, 200)
+
+
+class TestBindingsAPI(unittest.TestCase):
+    """3C-2: Multi-asset binding CRUD endpoints"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.client = TestClient(app)
+
+    def _setup(self, prefix):
+        bid, iid, pid = _ready_batch(self.client, prefix)
+        ar = self.client.post(f"/api/v1/products/{pid}/assets", json={
+            "original_filename": f"{prefix}_sf.png", "file_url": f"/mock/{prefix}_sf.png",
+        })
+        sf_aid = ar.json()["asset_id"]
+        self.client.put(f"/api/v1/products/{pid}/assets/{sf_aid}/role", json={"role_key": "start_frame"})
+        ar2 = self.client.post(f"/api/v1/products/{pid}/assets", json={
+            "original_filename": f"{prefix}_ef.png", "file_url": f"/mock/{prefix}_ef.png",
+        })
+        ef_aid = ar2.json()["asset_id"]
+        self.client.put(f"/api/v1/products/{pid}/assets/{ef_aid}/role", json={"role_key": "end_frame"})
+        ar3 = self.client.post(f"/api/v1/products/{pid}/assets", json={
+            "original_filename": f"{prefix}_ref.png", "file_url": f"/mock/{prefix}_ref.png",
+        })
+        ref_aid = ar3.json()["asset_id"]
+        self.client.put(f"/api/v1/products/{pid}/assets/{ref_aid}/role", json={"role_key": "reference_image"})
+        return iid, sf_aid, ef_aid, ref_aid
+
+    def test_a_get_empty_bindings(self):
+        iid, _, _, _ = self._setup("EMPTY")
+        r = self.client.get(f"/api/v1/video-instances/{iid}/nodes/S01_main/bindings")
+        self.assertEqual(r.status_code, 200)
+        self.assertIsNone(r.json()["start_frame"])
+        self.assertIsNone(r.json()["end_frame"])
+        self.assertEqual(r.json()["reference_images"], [])
+
+    def test_b_upsert_start_frame(self):
+        iid, sf_aid, _, _ = self._setup("UPSF")
+        r = self.client.put(f"/api/v1/video-instances/{iid}/nodes/S01_main/bindings/start_frame",
+            json={"asset_id": sf_aid, "source": "manual"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["binding_type"], "start_frame")
+        # Verify via GET
+        r2 = self.client.get(f"/api/v1/video-instances/{iid}/nodes/S01_main/bindings")
+        self.assertIsNotNone(r2.json()["start_frame"])
+        self.assertEqual(r2.json()["start_frame"]["asset_id"], sf_aid)
+
+    def test_c_double_upsert_start_frame_no_duplicate(self):
+        iid, sf_aid, ef_aid, _ = self._setup("UP2X")
+        self.client.put(f"/api/v1/video-instances/{iid}/nodes/S01_main/bindings/start_frame",
+            json={"asset_id": sf_aid, "source": "manual"})
+        self.client.put(f"/api/v1/video-instances/{iid}/nodes/S01_main/bindings/start_frame",
+            json={"asset_id": ef_aid, "source": "manual"})
+        r = self.client.get(f"/api/v1/video-instances/{iid}/nodes/S01_main/bindings")
+        self.assertIsNotNone(r.json()["start_frame"])
+        self.assertEqual(r.json()["start_frame"]["asset_id"], ef_aid)  # updated, not duplicated
+
+    def test_d_upsert_end_frame(self):
+        iid, _, ef_aid, _ = self._setup("UPEF")
+        r = self.client.put(f"/api/v1/video-instances/{iid}/nodes/S01_main/bindings/end_frame",
+            json={"asset_id": ef_aid, "source": "manual"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["binding_type"], "end_frame")
+        r2 = self.client.get(f"/api/v1/video-instances/{iid}/nodes/S01_main/bindings")
+        self.assertIsNotNone(r2.json()["end_frame"])
+        self.assertEqual(r2.json()["start_frame"], None)
+
+    def test_e_add_multiple_reference_images(self):
+        iid, _, _, ref_aid = self._setup("MREF")
+        self.client.post(f"/api/v1/video-instances/{iid}/nodes/S01_main/bindings/reference_images",
+            json={"asset_id": ref_aid, "source": "manual"})
+        self.client.post(f"/api/v1/video-instances/{iid}/nodes/S01_main/bindings/reference_images",
+            json={"asset_id": ref_aid, "source": "manual"})
+        r = self.client.get(f"/api/v1/video-instances/{iid}/nodes/S01_main/bindings")
+        refs = r.json()["reference_images"]
+        self.assertGreaterEqual(len(refs), 2)
+        self.assertEqual(refs[0]["sort_order"], 0)
+        self.assertEqual(refs[1]["sort_order"], 1)
+
+    def test_f_full_bindings_response(self):
+        iid, sf_aid, ef_aid, ref_aid = self._setup("FULL")
+        self.client.put(f"/api/v1/video-instances/{iid}/nodes/S01_main/bindings/start_frame",
+            json={"asset_id": sf_aid, "source": "manual"})
+        self.client.put(f"/api/v1/video-instances/{iid}/nodes/S01_main/bindings/end_frame",
+            json={"asset_id": ef_aid, "source": "manual"})
+        self.client.post(f"/api/v1/video-instances/{iid}/nodes/S01_main/bindings/reference_images",
+            json={"asset_id": ref_aid, "source": "manual"})
+        r = self.client.get(f"/api/v1/video-instances/{iid}/nodes/S01_main/bindings")
+        body = r.json()
+        self.assertIsNotNone(body["start_frame"])
+        self.assertIsNotNone(body["end_frame"])
+        self.assertEqual(len(body["reference_images"]), 1)
+        self.assertIn("asset_url", body["start_frame"])
+
+    def test_g_delete_binding(self):
+        iid, _, _, ref_aid = self._setup("DEL")
+        r = self.client.post(f"/api/v1/video-instances/{iid}/nodes/S01_main/bindings/reference_images",
+            json={"asset_id": ref_aid, "source": "manual"})
+        binding_id = r.json()["binding_id"]
+        r2 = self.client.delete(f"/api/v1/video-instances/{iid}/nodes/S01_main/bindings/{binding_id}")
+        self.assertEqual(r2.status_code, 200)
+        self.assertEqual(r2.json()["status"], "deleted")
+        r3 = self.client.get(f"/api/v1/video-instances/{iid}/nodes/S01_main/bindings")
+        self.assertEqual(r3.json()["reference_images"], [])
+
+    def test_h_delete_nonexistent_404(self):
+        iid, _, _, _ = self._setup("DEL404")
+        r = self.client.delete(f"/api/v1/video-instances/{iid}/nodes/S01_main/bindings/vnab_nonexist")
+        self.assertEqual(r.status_code, 404)
+
+    def test_i_asset_not_found_404(self):
+        iid, _, _, _ = self._setup("AS404")
+        r = self.client.put(f"/api/v1/video-instances/{iid}/nodes/S01_main/bindings/start_frame",
+            json={"asset_id": "asset_nonexistent", "source": "manual"})
+        self.assertEqual(r.status_code, 404)
+
+    def test_j_node_not_found_404(self):
+        iid, _, _, _ = self._setup("NN404")
+        r = self.client.get(f"/api/v1/video-instances/{iid}/nodes/S99_ghost/bindings")
+        self.assertEqual(r.status_code, 404)
+
+    def test_k_old_bind_endpoint_still_rejects_end_frame(self):
+        iid, _, ef_aid, _ = self._setup("OLD400")
+        r = self.client.put(f"/api/v1/video-instances/{iid}/nodes/S01_main/bind", json={
+            "asset_id": ef_aid, "source_type": "uploaded", "asset_role": "end_frame",
+        })
+        self.assertEqual(r.status_code, 400)
