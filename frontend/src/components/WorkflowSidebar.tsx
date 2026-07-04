@@ -135,7 +135,8 @@ export const WorkflowSidebar: React.FC<Props> = (p) => (
           ) : (
             <div className="max-h-48 overflow-y-auto space-y-1">
               {(p.assets || []).map(a => (
-                <div key={a.id} data-testid={`asset-card-${a.id}`} className="flex items-center gap-2 bg-[#0a0f1a] border border-white/5 rounded-lg p-1.5">
+                <div key={a.id} data-testid={`asset-card-${a.id}`} draggable onDragStart={e => { e.dataTransfer.setData('application/workbench-asset', JSON.stringify(a)); e.dataTransfer.effectAllowed = 'move'; }}
+                  className="flex items-center gap-2 bg-[#0a0f1a] border border-white/5 rounded-lg p-1.5 cursor-grab active:cursor-grabbing hover:border-purple-500/30 transition-colors">
                   <img src={a.url} alt={a.filename} className="w-8 h-8 rounded object-cover flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <div className="text-[10px] text-gray-300 truncate">{a.filename}</div>

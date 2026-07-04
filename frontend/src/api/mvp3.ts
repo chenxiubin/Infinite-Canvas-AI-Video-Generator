@@ -63,6 +63,22 @@ export const uploadAssetFile = async (file: File): Promise<{ asset_id: string; f
 export const bindAssetToVideoNode = (instanceId: string, shotKey: string, body: { asset_id: string; source_type: string; asset_role?: string }) =>
   request(`/api/v1/video-instances/${instanceId}/nodes/${shotKey}/bind`, { method: 'PUT', body: JSON.stringify(body) });
 
+// Multi-asset binding CRUD (9B-3C)
+export const getNodeBindings = (instanceId: string, shotKey: string) =>
+  request(`/api/v1/video-instances/${instanceId}/nodes/${shotKey}/bindings`);
+
+export const upsertStartFrameBinding = (instanceId: string, shotKey: string, body: { asset_id: string; source?: string }) =>
+  request(`/api/v1/video-instances/${instanceId}/nodes/${shotKey}/bindings/start_frame`, { method: 'PUT', body: JSON.stringify(body) });
+
+export const upsertEndFrameBinding = (instanceId: string, shotKey: string, body: { asset_id: string; source?: string }) =>
+  request(`/api/v1/video-instances/${instanceId}/nodes/${shotKey}/bindings/end_frame`, { method: 'PUT', body: JSON.stringify(body) });
+
+export const addReferenceImageBinding = (instanceId: string, shotKey: string, body: { asset_id: string; source?: string; sort_order?: number }) =>
+  request(`/api/v1/video-instances/${instanceId}/nodes/${shotKey}/bindings/reference_images`, { method: 'POST', body: JSON.stringify(body) });
+
+export const deleteNodeBinding = (instanceId: string, shotKey: string, bindingId: string) =>
+  request(`/api/v1/video-instances/${instanceId}/nodes/${shotKey}/bindings/${bindingId}`, { method: 'DELETE' });
+
 // Video Instances
 export const getVideoInstance = (id: string) =>
   request(`/api/v1/video-instances/${id}`);

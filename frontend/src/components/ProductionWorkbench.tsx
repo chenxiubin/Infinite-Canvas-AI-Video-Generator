@@ -11,7 +11,7 @@ interface NodeItem { node_id: string; shot_key: string; status: NodeStatus; [key
 interface InstanceData { instance_id: string; status: string; draft_preview_url?: string; review_status?: string; export_status?: string; final_video_url?: string; nodes?: NodeItem[] }
 
 interface WorkbenchAsset { id: string; filename: string; url: string; role: string; createdAt: number; backendAssetId?: string; }
-interface ShotFrameBinding { shotKey: string; startFrameAssetId?: string; endFrameAssetId?: string; referenceAssetIds?: string[]; }
+interface ShotFrameBinding { shotKey: string; startFrameAssetId?: string; startFrameBindingId?: string; endFrameAssetId?: string; endFrameBindingId?: string; referenceAssetIds?: string[]; referenceBindingIds?: string[]; }
 
 export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = ({ onSwitchToLegacy }) => {
   const [error, setError] = useState(''); const [loading, setLoading] = useState('');
@@ -26,6 +26,7 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
     ?? (selectedNodeId ? { node_id: '', shot_key: selectedNodeId, shot_name: selectedNodeId, status: 'pending', review_status: '-' } as any : null);
   const [assets, setAssets] = useState<WorkbenchAsset[]>([]);
   const [shotBindings, setShotBindings] = useState<ShotFrameBinding[]>([]);
+  const [connectingAssetId, setConnectingAssetId] = useState<string | null>(null);
 
   const batchIdRef = useRef(''); const instanceRef = useRef<InstanceData | null>(null);
   useEffect(() => { batchIdRef.current = batchId; }, [batchId]);
@@ -60,7 +61,7 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
       await api.exportInstance(ai.instance_id);const ei=await api.getVideoInstance(ai.instance_id);setInstance(ei);setNodes(ei.nodes||[]);addLog('mock export completed');
     }catch(e){showError(e);addLog(`ERROR: ${e?.message||e}`);}finally{setLoading('');}
   };
-  const handleReset = () => { assets.forEach(a => { if (a.url?.startsWith('blob:')) URL.revokeObjectURL(a.url); }); setProductId('');setChecklist(null);setBatchId('');setInstance(null);setNodes([]);setSelTemplateId('');setError('');setDemoLog([]);batchIdRef.current='';instanceRef.current=null;setSelectedNodeId(null);setAssets([]);setShotBindings([]); };
+  const handleReset = () => { assets.forEach(a => { if (a.url?.startsWith('blob:')) URL.revokeObjectURL(a.url); }); setProductId('');setChecklist(null);setBatchId('');setInstance(null);setNodes([]);setSelTemplateId('');setError('');setDemoLog([]);batchIdRef.current='';instanceRef.current=null;setSelectedNodeId(null);setAssets([]);setShotBindings([]);setConnectingAssetId(null); };
   const assetsRef = useRef(assets); assetsRef.current = assets;
   useEffect(() => { return () => { assetsRef.current.forEach(a => { if (a.url?.startsWith('blob:')) URL.revokeObjectURL(a.url); }); }; }, []);
 
@@ -88,13 +89,7 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
     setAssets(prev => prev.map(a => a.id === assetId ? { ...a, role } : a));
   };
   const handleBindShotFrame = async (shotKey: string, frameType: 'startFrame' | 'endFrame' | 'reference', assetId: string | null) => {
-    if (frameType === 'startFrame' && assetId && instance?.instance_id) {
-      const asset = assets.find(a => a.id === assetId);
-      if (asset?.backendAssetId) {
-        try { await api.bindAssetToVideoNode(instance.instance_id, shotKey, { asset_id: asset.backendAssetId, source_type: 'uploaded', asset_role: 'start_frame' }); }
-        catch (e: any) { setError(e?.message || '绑定失败'); return; }
-      }
-    }
+    // Optimistic local state update first (synchronous for UI responsiveness)
     setShotBindings(prev => {
       const existing = prev.find(b => b.shotKey === shotKey);
       if (!existing) {
@@ -107,12 +102,38 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
       return prev.map(b => {
         if (b.shotKey !== shotKey) return b;
         const updated = { ...b };
-        if (frameType === 'startFrame') updated.startFrameAssetId = assetId || undefined;
-        else if (frameType === 'endFrame') updated.endFrameAssetId = assetId || undefined;
-        else if (frameType === 'reference') updated.referenceAssetIds = assetId ? [assetId] : [];
+        if (frameType === 'startFrame') { updated.startFrameAssetId = assetId || undefined; if (!assetId) updated.startFrameBindingId = undefined; }
+        else if (frameType === 'endFrame') { updated.endFrameAssetId = assetId || undefined; if (!assetId) updated.endFrameBindingId = undefined; }
+        else if (frameType === 'reference') updated.referenceAssetIds = assetId ? [...(b.referenceAssetIds || []), assetId] : [];
         return updated;
       });
     });
+    // Persist to backend asynchronously
+    const iid = instance?.instance_id;
+    if (!iid) return;
+    if (!assetId) {
+      const b = shotBindings.find(s => s.shotKey === shotKey);
+      try {
+        if (frameType === 'startFrame' && b?.startFrameBindingId) await api.deleteNodeBinding(iid, shotKey, b.startFrameBindingId);
+        else if (frameType === 'endFrame' && b?.endFrameBindingId) await api.deleteNodeBinding(iid, shotKey, b.endFrameBindingId);
+      } catch (e: any) { setError(e?.message || '解绑失败'); }
+      return;
+    }
+    const asset = assets.find(a => a.id === assetId);
+    const beid = asset?.backendAssetId;
+    if (!beid) return;
+    try {
+      if (frameType === 'startFrame') {
+        const r = await api.upsertStartFrameBinding(iid, shotKey, { asset_id: beid, source: 'canvas' });
+        setShotBindings(prev => prev.map(b => b.shotKey === shotKey ? { ...b, startFrameBindingId: r.binding_id } : b));
+      } else if (frameType === 'endFrame') {
+        const r = await api.upsertEndFrameBinding(iid, shotKey, { asset_id: beid, source: 'canvas' });
+        setShotBindings(prev => prev.map(b => b.shotKey === shotKey ? { ...b, endFrameBindingId: r.binding_id } : b));
+      } else if (frameType === 'reference') {
+        const r = await api.addReferenceImageBinding(iid, shotKey, { asset_id: beid, source: 'canvas' });
+        setShotBindings(prev => prev.map(b => b.shotKey === shotKey ? { ...b, referenceBindingIds: [...(b.referenceBindingIds || []), r.binding_id] } : b));
+      }
+    } catch (e: any) { setError(e?.message || '绑定失败'); }
   };
   const selectedBinding = shotBindings.find(b => b.shotKey === selectedNode?.shot_key);
   const getBoundAsset = (assetId?: string) => assets.find(a => a.id === assetId);
@@ -154,7 +175,12 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
         <main className="min-w-0 min-h-0 overflow-hidden bg-[#060b14]">
           <ProductionCanvasView instance={instance} nodes={nodes} onRefresh={refreshAll}
             onSelectNode={handleSelectNode}
-            assets={assets} shotBindings={shotBindings} />
+            assets={assets} shotBindings={shotBindings}
+            onConnectBinding={handleBindShotFrame}
+            onDeleteBinding={(shotKey, frameType) => handleBindShotFrame(shotKey, frameType as any, null)}
+            connectingAssetId={connectingAssetId}
+            onStartConnecting={setConnectingAssetId}
+            onCancelConnecting={() => setConnectingAssetId(null)} />
         </main>
 
         {/* Right: Inspector */}

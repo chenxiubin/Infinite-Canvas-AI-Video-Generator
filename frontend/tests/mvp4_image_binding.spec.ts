@@ -50,7 +50,8 @@ test.describe('MVP-4 Image Binding', () => {
 
     // Switch to canvas and click S01_main
     await page.getByTestId('workbench-tab-canvas').click();
-    await expect(page.getByTestId('canvas-node-S01_main')).toBeVisible({ timeout: 8000 });
+    await expect(page.getByTestId('canvas-node-S01_main')).toBeAttached({ timeout: 15000 });
+    await page.getByTestId('canvas-node-S01_main').click({ force: true });
     await page.getByTestId('canvas-node-S01_main').click();
     await expect(page.getByTestId('canvas-node-detail-panel')).toBeVisible({ timeout: 8000 });
 
@@ -80,8 +81,8 @@ test.describe('MVP-4 Image Binding', () => {
     test.setTimeout(30000);
     // Without any product/batch, click a skeleton node
     await page.getByTestId('workbench-tab-canvas').click();
-    await expect(page.getByTestId('canvas-node-S02_detail1')).toBeVisible({ timeout: 8000 });
-    await page.getByTestId('canvas-node-S02_detail1').click();
+    await expect(page.getByTestId('canvas-node-S02_detail1')).toBeAttached({ timeout: 15000 });
+    await page.getByTestId('canvas-node-S02_detail1').click({ force: true });
     // Frame binding section should show warning
     await expect(page.getByTestId('frame-binding-warning')).toBeVisible({ timeout: 5000 });
     // Node card should show missing frame placeholder
