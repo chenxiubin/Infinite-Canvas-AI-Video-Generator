@@ -112,7 +112,8 @@ def get_db():
 def init_db():
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     cursor = conn.cursor()
-    
+    cursor.execute("PRAGMA foreign_keys = ON")
+
     # 1. Templates
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS templates (
@@ -479,6 +480,31 @@ def init_db():
         completed_at REAL
     )
     """)
+
+    # 19. Video Node Asset Bindings (Sprint 9B-3C)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS video_node_asset_bindings (
+        id TEXT PRIMARY KEY,
+        instance_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        shot_key TEXT NOT NULL,
+        binding_type TEXT NOT NULL CHECK(binding_type IN ('start_frame', 'end_frame', 'reference_image')),
+        asset_id TEXT NOT NULL,
+        asset_role TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT 'manual',
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL,
+        FOREIGN KEY (node_id) REFERENCES video_instance_nodes(id) ON DELETE CASCADE,
+        FOREIGN KEY (asset_id) REFERENCES product_assets(id)
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_vnab_lookup ON video_node_asset_bindings(instance_id, shot_key, binding_type)")
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS uniq_vnab_single_frame ON video_node_asset_bindings(instance_id, shot_key, binding_type) WHERE binding_type IN ('start_frame', 'end_frame')")
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS uniq_vnab_reference_order ON video_node_asset_bindings(instance_id, shot_key, sort_order) WHERE binding_type = 'reference_image'")
+    cursor.execute("""INSERT OR IGNORE INTO video_node_asset_bindings (id, instance_id, node_id, shot_key, binding_type, asset_id, asset_role, source, sort_order, created_at, updated_at)
+    SELECT 'vnab_'||lower(hex(randomblob(6))), vin.instance_id, vin.id, vin.shot_key, 'start_frame', vin.bound_asset_id, COALESCE(vin.bound_asset_role,'start_frame'), COALESCE(vin.bound_asset_source,'migrated'), 0, vin.created_at, vin.updated_at
+    FROM video_instance_nodes vin WHERE vin.bound_asset_id IS NOT NULL AND vin.bound_asset_id!='' AND NOT EXISTS (SELECT 1 FROM video_node_asset_bindings vnab WHERE vnab.instance_id=vin.instance_id AND vnab.shot_key=vin.shot_key AND vnab.binding_type='start_frame')""")
 
     conn.commit()
 
