@@ -12,16 +12,9 @@ test.describe('MVP-3 Production Workbench', () => {
 
   test('M3-Model: gateway settings visible and default mock', async ({ page }) => {
     test.setTimeout(30000);
-    // Model settings panel should be visible
     await expect(page.getByTestId('model-settings-panel')).toBeVisible({ timeout: 5000 });
     await expect(page.getByTestId('selected-model-adapter')).toContainText('mock');
     await expect(page.getByTestId('model-adapter-status-mock')).toContainText('ready');
-    // external_http should show not configured
-    const extStatus = page.getByTestId('model-adapter-status-external_http');
-    // external_http status indicator is only shown when not configured
-    if (await extStatus.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await expect(extStatus).toBeVisible();
-    }
   });
 
   test('M3-Happy: complete desk calendar production chain via UI', async ({ page }) => {

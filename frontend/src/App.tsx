@@ -38,7 +38,7 @@ function App() {
   const [preflightChecked, setPreflightChecked] = useState(false);
   const [templateName, setTemplateName] = useState('');
   const [customTemplates, setCustomTemplates] = useState<{template_id: string, name: string}[]>([]);
-  const [showWorkbench, setShowWorkbench] = useState(false);
+  const isLegacyCanvas = window.location.pathname === '/legacy-canvas';
 
   const fetchTemplates = async () => {
     const isOffline = useCanvasStore.getState().isOfflineMode;
@@ -160,21 +160,9 @@ function App() {
     setProductLine(e.target.value as 'hanging' | 'desk');
   };
 
-  if (showWorkbench) {
-    return (
-      <div className="app-container">
-        <header className="top-toolbar" style={{ padding: '8px 16px' }}>
-          <h1 className="toolbar-title">
-            <Wrench className="w-5 h-5 text-emerald-400" />
-            <span>MVP-3 视频生产工作台</span>
-          </h1>
-          <button onClick={() => setShowWorkbench(false)} className="secondary-btn text-xs px-3 py-1 rounded">
-            返回画布
-          </button>
-        </header>
-        <ProductionWorkbench />
-      </div>
-    );
+  // MVP-4 Production Workbench (default at /)
+  if (!isLegacyCanvas) {
+    return <ProductionWorkbench onSwitchToLegacy={() => { window.location.href = '/legacy-canvas'; }} />;
   }
 
   return (
@@ -185,7 +173,7 @@ function App() {
           <Sparkles className="w-5 h-5 text-pink-400" />
           <span>无限画布 AI 视频生成平台</span>
           <span className="text-[10px] bg-white/10 text-gray-300 font-normal px-2 py-0.5 rounded-full">
-            MVP-1
+            Legacy Canvas
           </span>
         </h1>
 
@@ -263,9 +251,9 @@ function App() {
 
           {/* MVP-3 Workbench */}
           <button
-            onClick={() => setShowWorkbench(true)}
+            onClick={() => { window.location.href = '/'; }}
             className="secondary-btn text-xs px-3 py-1 rounded"
-            title="MVP-3 生产工作台"
+            title="MVP-4 生产工作台"
           >
             <Wrench className="w-4 h-4" />
             生产工作台

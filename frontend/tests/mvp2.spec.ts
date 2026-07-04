@@ -7,8 +7,8 @@ test.describe('Infinite Canvas Video Generator - MVP-2 Tests', () => {
     page.on('console', msg => console.log('BROWSER_LOG:', msg.text()));
     page.on('pageerror', err => console.log('BROWSER_ERR:', err.message));
     
-    // Navigate to the local server
-    await page.goto('/');
+    // Navigate to the legacy canvas route
+    await page.goto('/legacy-canvas');
     // Wait for the workspace to initialize and sync with FastAPI backend
     await expect(page.locator('div[data-id="S01_main"] .node-title')).toContainText('主图-正面', { timeout: 8000 });
   });

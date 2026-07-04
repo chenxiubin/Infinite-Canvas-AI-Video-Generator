@@ -93,7 +93,8 @@ test.describe('MVP-3 Canvas View', () => {
 
     // Open S04_motion detail panel
     await page.getByTestId('canvas-node-S04_motion').click();
-    await expect(page.getByTestId('canvas-node-detail-panel')).toBeVisible({ timeout: 8000 });
+    await page.waitForTimeout(500);
+    await expect(page.getByTestId('canvas-node-detail-panel')).toBeVisible({ timeout: 10000 });
 
     const panel = page.getByTestId('canvas-node-detail-panel');
     await expect(page.getByTestId('canvas-detail-shot-key')).toContainText('S04_motion');

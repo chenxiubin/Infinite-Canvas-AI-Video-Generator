@@ -1,0 +1,182 @@
+import React, { useState } from 'react';
+import * as api from '../api/mvp3';
+import { Eye, Check, X, RotateCcw, AlertCircle, Activity, Cpu, Layers, FileVideo } from 'lucide-react';
+
+interface NodeDetail {
+  node_id: string; shot_key: string; shot_name: string; shot_order: number;
+  duration_seconds: number; required_asset_role: string;
+  bound_asset_id?: string; bound_asset_role?: string; bound_asset_source?: string;
+  status: string; review_status?: string;
+  prompt?: string; video_url?: string; cover_url?: string; error_message?: string;
+}
+
+interface Props {
+  node: NodeDetail | null;
+  instanceId: string;
+  onRefresh: () => void;
+  instance?: any;
+  modelAdapter?: string;
+  batchStatus?: string;
+  nodeCount?: number;
+}
+
+const reviewBadgeCls: Record<string, string> = {
+  approved: 'text-green-400 bg-green-900/30 border-green-500/30',
+  rejected: 'text-red-400 bg-red-900/30 border-red-500/30',
+  pending: 'text-yellow-400 bg-yellow-900/20 border-yellow-500/30',
+  not_ready: 'text-gray-500 bg-gray-800 border-gray-600/20',
+  not_required: 'text-gray-500 bg-gray-800 border-gray-600/20',
+};
+const statusBadgeCls: Record<string, string> = {
+  pending: 'text-gray-400 bg-gray-800 border-gray-600/30',
+  running: 'text-blue-400 bg-blue-900/30 border-blue-500/30',
+  success: 'text-green-400 bg-green-900/30 border-green-500/30',
+  failed: 'text-red-400 bg-red-900/30 border-red-500/30',
+};
+
+export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefresh, instance, modelAdapter, batchStatus, nodeCount }) => {
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const doAction = async (fn: () => Promise<any>) => {
+    try { setError(''); setLoading(true); await fn(); await onRefresh(); } catch (e: any) { setError(e?.message || String(e)); } finally { setLoading(false); }
+  };
+
+  const rv = node?.review_status || '-';
+  const rvCls = reviewBadgeCls[rv] || reviewBadgeCls.not_ready;
+  const stCls = statusBadgeCls[node?.status || ''] || statusBadgeCls.pending;
+
+  return (
+    <aside data-testid="right-inspector-panel"
+      className="h-full flex flex-col bg-[#0d1117] border-l border-white/5 overflow-hidden text-xs">
+      <div className="flex-shrink-0 flex items-center gap-2 px-3 py-2.5 border-b border-white/5 bg-[#111827]">
+        <Eye className="w-3.5 h-3.5 text-purple-400" />
+        <span className="text-gray-300 font-medium text-[11px] tracking-wide">属性检查器</span>
+        {node && <span className="text-gray-600 text-[10px] ml-auto">{node.shot_key}</span>}
+      </div>
+
+      {/* Empty state — enhanced with production overview */}
+      {!node && (
+        <div className="flex-1 flex flex-col overflow-y-auto p-4 space-y-3">
+          <div className="text-center py-3">
+            <div className="w-10 h-10 rounded-full bg-[#1a1f2e] flex items-center justify-center mx-auto mb-2">
+              <Eye className="w-4 h-4 text-gray-600" />
+            </div>
+            <div className="text-gray-500 text-[11px]">请在画布中选择一个分镜节点查看详情</div>
+          </div>
+
+          {/* Production overview */}
+          <div className="bg-[#111827] border border-white/5 rounded-xl p-3 space-y-2">
+            <div className="flex items-center gap-1.5 text-gray-500 text-[10px]">
+              <Activity className="w-3 h-3 text-purple-400" /> 当前状态
+            </div>
+            <div className="space-y-1.5 text-[10px]">
+              <div className="flex justify-between"><span className="text-gray-600">模型适配器</span><span className="text-purple-300">{modelAdapter || 'mock'}</span></div>
+              <div className="flex justify-between"><span className="text-gray-600">视频批次</span><span className="text-gray-300">{batchStatus || (instanceId ? '就绪' : '未创建')}</span></div>
+              <div className="flex justify-between"><span className="text-gray-600">分镜节点数</span><span className="text-gray-300">{nodeCount || 0}</span></div>
+            </div>
+          </div>
+
+          {/* Next steps */}
+          <div className="bg-[#111827] border border-white/5 rounded-xl p-3">
+            <div className="text-gray-500 text-[10px] mb-2">下一步操作</div>
+            <div className="space-y-1.5 text-[10px] text-gray-600">
+              <div>1. 在左侧面板创建演示产品</div>
+              <div>2. 选择视频模板</div>
+              <div>3. 创建并生成视频批次</div>
+              <div>4. 点击画布中的分镜节点</div>
+              <div>5. 审核通过后导出视频</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Node detail */}
+      {node && (
+        <div data-testid="canvas-node-detail-panel" className="flex-1 flex flex-col min-h-0 overflow-y-auto" style={{ minHeight: 200 }}>
+          {error && (
+            <div data-testid="canvas-detail-error-message"
+              className="flex-shrink-0 flex items-start gap-2 bg-red-950/40 border-b border-red-500/20 text-red-300 px-3 py-2 text-[11px]">
+              <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" /><span>{error}</span>
+            </div>
+          )}
+          {loading && (
+            <div className="flex-shrink-0 text-blue-400 text-[11px] px-3 py-1.5 bg-blue-950/20 border-b border-blue-500/10 animate-pulse">处理中...</div>
+          )}
+
+          <div className="flex-shrink-0 p-3 space-y-3">
+            <div>
+              <div data-testid="canvas-detail-shot-key" className="text-sm font-semibold text-gray-100">{node.shot_key}</div>
+              <div className="text-gray-500 text-[11px] mt-0.5">{node.shot_name}</div>
+            </div>
+
+            <div className="flex gap-2">
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium border ${stCls}`}>{node.status}</span>
+              <span data-testid="canvas-detail-review-status" className={`text-[10px] px-2 py-0.5 rounded-full font-medium border ${rvCls}`}>审核: {rv}</span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-[10px] bg-[#0a0f1a] rounded-lg p-2.5 border border-white/5">
+              <div><div className="text-gray-600 mb-0.5">状态</div><div data-testid="canvas-detail-status" className="text-gray-200">{node.status}</div></div>
+              <div><div className="text-gray-600 mb-0.5">bound_asset_role</div><div className="text-gray-300">{node.bound_asset_role || '-'}</div></div>
+              <div><div className="text-gray-600 mb-0.5">时长</div><div className="text-gray-300">{node.duration_seconds}秒</div></div>
+              <div><div className="text-gray-600 mb-0.5">bound_asset_source</div><div className="text-gray-500 truncate">{node.bound_asset_source || '-'}</div></div>
+            </div>
+
+            {node.video_url && (
+              <div className="bg-[#0a0f1a] rounded-lg p-2.5 border border-white/5">
+                <div className="text-gray-600 text-[10px] mb-1">视频地址</div>
+                <div data-testid="canvas-detail-video-url" className="text-green-400 break-all text-[10px] leading-relaxed">{node.video_url}</div>
+              </div>
+            )}
+            {node.prompt && (
+              <div className="bg-[#0a0f1a] rounded-lg p-2.5 border border-white/5">
+                <div className="text-gray-600 text-[10px] mb-1">prompt</div>
+                <div className="text-gray-400 break-all text-[10px] leading-relaxed">{node.prompt}</div>
+              </div>
+            )}
+            {node.error_message && (
+              <div className="bg-red-950/20 border border-red-500/20 rounded-lg p-2.5">
+                <div className="text-red-400 text-[10px] mb-1">错误信息</div>
+                <div className="text-red-300 text-[10px]">{node.error_message}</div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex-shrink-0 p-3 border-t border-white/5 space-y-2 mt-auto">
+            {node.status === 'failed' && (
+              <button data-testid="canvas-detail-retry-button"
+                onClick={() => doAction(() => api.retryVideoNode(node.node_id))}
+                className="flex items-center justify-center gap-1.5 bg-orange-900/40 hover:bg-orange-900/60 text-orange-300 text-xs px-3 py-2 rounded-lg w-full transition-colors border border-orange-700/20 font-medium">
+                <RotateCcw className="w-3 h-3" /> 重试
+              </button>
+            )}
+            {node.status === 'success' && (
+              <>
+                <button data-testid="canvas-detail-approve-button"
+                  onClick={() => doAction(() => api.reviewVideoNode(node.node_id, 'approve'))}
+                  className="flex items-center justify-center gap-1.5 bg-green-900/40 hover:bg-green-900/60 text-green-300 text-xs px-3 py-2 rounded-lg w-full transition-colors border border-green-700/20 font-medium">
+                  <Check className="w-3 h-3" /> 通过
+                </button>
+                <div className="space-y-1.5">
+                  <input data-testid="canvas-detail-reject-reason"
+                    placeholder="输入驳回原因..."
+                    value={reason} onChange={e => setReason(e.target.value)}
+                    className="bg-[#0a0f1a] border border-white/10 rounded-lg px-3 py-2 text-gray-200 text-xs w-full placeholder:text-gray-600 focus:outline-none focus:border-red-500/50 transition-colors" />
+                  <button data-testid="canvas-detail-reject-button"
+                    onClick={() => { if (!reason.trim()) { setError('驳回必须填写原因'); return; } doAction(() => api.reviewVideoNode(node.node_id, 'reject', reason)); }}
+                    className="flex items-center justify-center gap-1.5 bg-red-900/40 hover:bg-red-900/60 text-red-300 text-xs px-3 py-2 rounded-lg w-full transition-colors border border-red-700/20 font-medium">
+                    <X className="w-3 h-3" /> 驳回
+                  </button>
+                </div>
+              </>
+            )}
+            {node.status !== 'success' && node.status !== 'failed' && (
+              <div className="text-gray-600 text-[10px] text-center py-2">节点完成后可进行操作</div>
+            )}
+          </div>
+        </div>
+      )}
+    </aside>
+  );
+};
