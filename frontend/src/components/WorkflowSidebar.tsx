@@ -1,6 +1,8 @@
 import React from 'react';
 import { DemoStepLog } from './DemoStepLog';
-import { Package, FileVideo, Layers, Cpu, Play, Eye, CheckCheck, Download, X, AlertTriangle } from 'lucide-react';
+import { Package, FileVideo, Layers, Cpu, Play, Eye, CheckCheck, Download, X, AlertTriangle, Image, Upload } from 'lucide-react';
+
+interface WorkbenchAsset { id: string; filename: string; url: string; role: string; createdAt: number; }
 
 interface Props {
   productId: string; isReady: boolean | undefined; templates: any[]; selTemplateId: string;
@@ -9,6 +11,7 @@ interface Props {
   onCreateDemo: () => void; onSelectTemplate: (id: string) => void; onCreateBatch: () => void;
   onGenerate: () => void; onMerge: () => void; onApproveAll: () => void; onExport: () => void;
   onSetModelAdapter: (k: string) => void; onSetViewMode: (m: 'form' | 'canvas') => void; onClearError: () => void;
+  assets?: WorkbenchAsset[]; onUploadAssets?: (files: FileList) => void; onUpdateAssetRole?: (assetId: string, role: string) => void;
 }
 
 const SectionCard: React.FC<{ title: string; icon: React.ReactNode; children: React.ReactNode; testid?: string }> =
@@ -115,6 +118,41 @@ export const WorkflowSidebar: React.FC<Props> = (p) => (
             <span className="w-1.5 h-1.5 rounded-full bg-gray-600" /> external_http：未配置
           </div>
           <div data-testid="selected-model-adapter" className="text-gray-600 text-[9px] px-1">当前：{p.modelAdapter}</div>
+        </div>
+      </SectionCard>
+
+      {/* 图片素材包 */}
+      <SectionCard title="图片素材包" icon={<Image className="w-3 h-3" />} testid="sidebar-section-assets">
+        <div data-testid="asset-library-panel" className="space-y-1.5">
+          <label className="flex items-center justify-center gap-1.5 bg-purple-900/20 hover:bg-purple-900/40 text-purple-300 text-xs px-2.5 py-2 rounded-lg w-full cursor-pointer transition-colors border border-dashed border-purple-700/30">
+            <Upload className="w-3 h-3" />
+            <span>上传图片素材</span>
+            <input data-testid="asset-upload-input" type="file" accept="image/*" multiple className="hidden"
+              onChange={e => { if (e.target.files && p.onUploadAssets) p.onUploadAssets(e.target.files); e.target.value = ''; }} />
+          </label>
+          {(p.assets || []).length === 0 ? (
+            <div className="text-gray-600 text-[10px] text-center py-2">暂无素材<br/>请先上传用于图生视频的参考图片</div>
+          ) : (
+            <div className="max-h-48 overflow-y-auto space-y-1">
+              {(p.assets || []).map(a => (
+                <div key={a.id} data-testid={`asset-card-${a.id}`} className="flex items-center gap-2 bg-[#0a0f1a] border border-white/5 rounded-lg p-1.5">
+                  <img src={a.url} alt={a.filename} className="w-8 h-8 rounded object-cover flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[10px] text-gray-300 truncate">{a.filename}</div>
+                    <select value={a.role} onChange={e => p.onUpdateAssetRole?.(a.id, e.target.value)}
+                      className="bg-transparent text-[9px] text-gray-500 border-none p-0 focus:outline-none">
+                      <option value="product">产品图</option>
+                      <option value="scene">场景图</option>
+                      <option value="start_frame">首帧图</option>
+                      <option value="end_frame">尾帧图</option>
+                      <option value="reference">参考图</option>
+                      <option value="logo">Logo</option>
+                    </select>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </SectionCard>
 

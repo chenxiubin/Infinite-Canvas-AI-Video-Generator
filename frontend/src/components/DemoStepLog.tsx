@@ -6,7 +6,7 @@ const STEPS = [
   { key: 'assets registered', label: '注册素材', testid: 'demo-progress-step-assets' },
   { key: 'checklist ready', label: '前置检查就绪', testid: 'demo-progress-step-checklist' },
   { key: 'batch created', label: '创建批次', testid: 'demo-progress-step-batch' },
-  { key: 'generated success', label: 'Mock 生成', testid: 'demo-progress-step-generate' },
+  { key: 'generated success', label: '模拟生成', testid: 'demo-progress-step-generate' },
   { key: 'preview generated', label: '草稿预览', testid: 'demo-progress-step-preview' },
   { key: 'review approved', label: '全部通过', testid: 'demo-progress-step-review' },
   { key: 'mock export completed', label: '导出', testid: 'demo-progress-step-export' },

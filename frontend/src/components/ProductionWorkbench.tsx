@@ -10,6 +10,9 @@ type NodeStatus = 'pending' | 'running' | 'success' | 'failed';
 interface NodeItem { node_id: string; shot_key: string; status: NodeStatus; [key: string]: any }
 interface InstanceData { instance_id: string; status: string; draft_preview_url?: string; review_status?: string; export_status?: string; final_video_url?: string; nodes?: NodeItem[] }
 
+interface WorkbenchAsset { id: string; filename: string; url: string; role: string; createdAt: number; }
+interface ShotFrameBinding { shotKey: string; startFrameAssetId?: string; endFrameAssetId?: string; referenceAssetIds?: string[]; }
+
 export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = ({ onSwitchToLegacy }) => {
   const [error, setError] = useState(''); const [loading, setLoading] = useState('');
   const [demoLog, setDemoLog] = useState<string[]>([]); const [productId, setProductId] = useState('');
@@ -19,7 +22,10 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
   const [viewMode, setViewMode] = useState<'form' | 'canvas'>('canvas');
   const [modelAdapter, setModelAdapter] = useState('mock'); const [adapters, setAdapters] = useState<any[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const selectedNode = nodes.find(n => n.node_id === selectedNodeId) ?? null;
+  const selectedNode = nodes.find(n => n.node_id === selectedNodeId || n.shot_key === selectedNodeId)
+    ?? (selectedNodeId ? { node_id: '', shot_key: selectedNodeId, shot_name: selectedNodeId, status: 'pending', review_status: '-' } as any : null);
+  const [assets, setAssets] = useState<WorkbenchAsset[]>([]);
+  const [shotBindings, setShotBindings] = useState<ShotFrameBinding[]>([]);
 
   const batchIdRef = useRef(''); const instanceRef = useRef<InstanceData | null>(null);
   useEffect(() => { batchIdRef.current = batchId; }, [batchId]);
@@ -29,6 +35,7 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
   const addLog = (msg: string) => setDemoLog(prev => [...prev, msg]);
   const loadInstance = useCallback(async (iid: string) => { const inst = await api.getVideoInstance(iid); setInstance(inst); setNodes(inst.nodes || []); }, []);
   const refreshAll = async () => { if (instanceRef.current) { const i = await api.getVideoInstance(instanceRef.current.instance_id); setInstance(i); setNodes(i.nodes || []); } };
+  const handleSelectNode = useCallback((n: any) => { setSelectedNodeId(n?.node_id || n?.shot_key || null); }, []);
 
   useEffect(() => { api.listVideoTemplates().then(d => setTemplates(d.templates || [])).catch(() => {}); api.listModelAdapters().then(d => setAdapters(d.adapters || [])).catch(() => {}); }, []);
 
@@ -53,7 +60,9 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
       await api.exportInstance(ai.instance_id);const ei=await api.getVideoInstance(ai.instance_id);setInstance(ei);setNodes(ei.nodes||[]);addLog('mock export completed');
     }catch(e){showError(e);addLog(`ERROR: ${e?.message||e}`);}finally{setLoading('');}
   };
-  const handleReset = () => { setProductId('');setChecklist(null);setBatchId('');setInstance(null);setNodes([]);setSelTemplateId('');setError('');setDemoLog([]);batchIdRef.current='';instanceRef.current=null;setSelectedNodeId(null); };
+  const handleReset = () => { assets.forEach(a => { if (a.url?.startsWith('blob:')) URL.revokeObjectURL(a.url); }); setProductId('');setChecklist(null);setBatchId('');setInstance(null);setNodes([]);setSelTemplateId('');setError('');setDemoLog([]);batchIdRef.current='';instanceRef.current=null;setSelectedNodeId(null);setAssets([]);setShotBindings([]); };
+  const assetsRef = useRef(assets); assetsRef.current = assets;
+  useEffect(() => { return () => { assetsRef.current.forEach(a => { if (a.url?.startsWith('blob:')) URL.revokeObjectURL(a.url); }); }; }, []);
 
   // --- Handlers ---
   const handleDemoDesk = async () => { try{clearError();const s=`SKU-DEMO-${Date.now()}`;const d=await api.createProduct({product_type:'desk_calendar',sku:s,title:`Demo ${s}`});const p=d.product_id;setProductId(p);for(const r of['main','detail1','detail2','scene','brand']){await api.registerAsset(p,{original_filename:`${s}_${r}.jpg`,file_url:`/mock/${s}_${r}.jpg`});}const dd=await api.getProduct(p);for(const a of(dd.assets||[])){if(a.role_key!=='unrecognized')await api.updateAssetRole(p,a.asset_id,a.role_key);}const fd=await api.getProduct(p);setChecklist(fd.checklist||null);}catch(e){showError(e);} };
@@ -62,6 +71,39 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
   const handleMerge = async () => { const i=instanceRef.current;if(!i)return;try{clearError();await api.mergePreview(i.instance_id);await loadInstance(i.instance_id);}catch(e){showError(e);} };
   const handleApproveAll = async () => { const i=instanceRef.current;if(!i)return;try{clearError();await api.reviewInstance(i.instance_id,'approve');await loadInstance(i.instance_id);}catch(e){showError(e);} };
   const handleExport = async () => { const i=instanceRef.current;if(!i)return;try{clearError();await api.exportInstance(i.instance_id);await loadInstance(i.instance_id);}catch(e){showError(e);} };
+
+  const handleUploadAssets = (files: FileList) => {
+    const newAssets: WorkbenchAsset[] = Array.from(files).map(f => ({
+      id: `asset_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+      filename: f.name, url: URL.createObjectURL(f), role: 'reference', createdAt: Date.now(),
+    }));
+    setAssets(prev => [...prev, ...newAssets]);
+  };
+  const handleUpdateAssetRole = (assetId: string, role: string) => {
+    setAssets(prev => prev.map(a => a.id === assetId ? { ...a, role } : a));
+  };
+  const handleBindShotFrame = (shotKey: string, frameType: 'startFrame' | 'endFrame' | 'reference', assetId: string | null) => {
+    setShotBindings(prev => {
+      const existing = prev.find(b => b.shotKey === shotKey);
+      if (!existing) {
+        const b: ShotFrameBinding = { shotKey };
+        if (frameType === 'startFrame') b.startFrameAssetId = assetId || undefined;
+        else if (frameType === 'endFrame') b.endFrameAssetId = assetId || undefined;
+        else if (frameType === 'reference') b.referenceAssetIds = assetId ? [assetId] : [];
+        return [...prev, b];
+      }
+      return prev.map(b => {
+        if (b.shotKey !== shotKey) return b;
+        const updated = { ...b };
+        if (frameType === 'startFrame') updated.startFrameAssetId = assetId || undefined;
+        else if (frameType === 'endFrame') updated.endFrameAssetId = assetId || undefined;
+        else if (frameType === 'reference') updated.referenceAssetIds = assetId ? [assetId] : [];
+        return updated;
+      });
+    });
+  };
+  const selectedBinding = shotBindings.find(b => b.shotKey === selectedNode?.shot_key);
+  const getBoundAsset = (assetId?: string) => assets.find(a => a.id === assetId);
 
   const allSuccess = nodes.length>0&&nodes.every(n=>n.status==='success');
   const canExport = instance?.review_status==='approved';
@@ -92,18 +134,22 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
             onCreateBatch={handleCreateBatch} onGenerate={handleGenerate}
             onMerge={handleMerge} onApproveAll={handleApproveAll} onExport={handleExport}
             onSetModelAdapter={setModelAdapter} onSetViewMode={setViewMode} onClearError={clearError}
+            assets={assets} onUploadAssets={handleUploadAssets} onUpdateAssetRole={handleUpdateAssetRole}
           />
         </div>
 
         {/* Center: Canvas — always visible as main area */}
         <main className="min-w-0 min-h-0 overflow-hidden bg-[#060b14]">
           <ProductionCanvasView instance={instance} nodes={nodes} onRefresh={refreshAll}
-            onSelectNode={(n) => setSelectedNodeId(n?.node_id ?? null)} />
+            onSelectNode={handleSelectNode}
+            assets={assets} shotBindings={shotBindings} />
         </main>
 
         {/* Right: Inspector */}
         <div className="min-h-0 overflow-hidden">
-          <RightInspectorPanel node={selectedNode} instanceId={instance?.instance_id||''} onRefresh={refreshAll} />
+          <RightInspectorPanel node={selectedNode} instanceId={instance?.instance_id||''} onRefresh={refreshAll}
+            assets={assets} selectedBinding={selectedBinding} getBoundAsset={getBoundAsset}
+            onBindShotFrame={handleBindShotFrame} />
         </div>
       </div>
     </div>

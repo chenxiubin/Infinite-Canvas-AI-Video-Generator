@@ -14,11 +14,16 @@ interface NodeItem {
   prompt?: string; video_url?: string; cover_url?: string; error_message?: string;
 }
 
+interface WorkbenchAsset { id: string; filename: string; url: string; role: string; createdAt: number; }
+interface ShotFrameBinding { shotKey: string; startFrameAssetId?: string; endFrameAssetId?: string; referenceAssetIds?: string[]; }
+
 interface Props {
   instance: any;
   nodes: NodeItem[];
   onRefresh: () => void;
   onSelectNode?: (node: NodeItem | null) => void;
+  assets?: WorkbenchAsset[];
+  shotBindings?: ShotFrameBinding[];
 }
 
 const DEFAULT_SHOTS = [
@@ -46,22 +51,37 @@ const reviewBadge: Record<string, string> = {
 };
 
 // Custom React Flow node — preserves ALL data-testids
-const WorkbenchCanvasNode: React.FC<{ id: string; data: { item: any; onSelect?: (n: any) => void } }> = ({ id, data }) => {
+const WorkbenchCanvasNode: React.FC<{ id: string; data: { item: any; onSelect?: (n: any) => void; assets?: WorkbenchAsset[]; binding?: ShotFrameBinding } }> = ({ id, data }) => {
   const n = data.item;
   const st = n.status || 'pending';
   const rv = n.review_status || '-';
   const rvCls = reviewBadge[rv] || 'text-gray-500 bg-gray-800 border-gray-600/20';
+  const binding = data.binding;
+  const sfAsset = data.assets?.find(a => a.id === binding?.startFrameAssetId);
+  const efAsset = data.assets?.find(a => a.id === binding?.endFrameAssetId);
+  const hasFrame = !!sfAsset;
   return (
     <div
       data-testid={`canvas-node-${n.shot_key}`}
       onClick={() => data.onSelect?.(n)}
-      className={`cursor-pointer border-2 rounded-xl p-4 w-44 flex-shrink-0 transition-all duration-200 hover:border-white/20 hover:shadow-md ${statusColors[st] || statusColors.pending}`}
+      className={`cursor-pointer border-2 rounded-xl p-4 w-48 flex-shrink-0 transition-all duration-200 hover:border-white/20 hover:shadow-md ${statusColors[st] || statusColors.pending}`}
     >
       <div className="flex items-center gap-2 mb-2">
         <span className={`w-2 h-2 rounded-full flex-shrink-0 ${statusDot[st] || 'bg-gray-500'}`} />
         <span className="node-title text-xs font-semibold text-gray-100 truncate">{n.shot_name}</span>
       </div>
       <div className="text-[10px] text-gray-500 mb-1">{n.shot_key}</div>
+      {/* Thumbnail or placeholder */}
+      {sfAsset ? (
+        <div className="mb-2 rounded-lg overflow-hidden border border-white/10">
+          <img src={sfAsset.url} alt="首帧" className="w-full h-16 object-cover" />
+          <div className="text-[8px] text-green-400 bg-green-900/30 px-1.5 py-0.5 text-center">{hasFrame && efAsset ? '首尾帧已就绪' : '首帧已绑定'}</div>
+        </div>
+      ) : (
+        <div className="mb-2 rounded-lg border border-dashed border-amber-700/40 bg-amber-900/10 h-16 flex items-center justify-center">
+          <span className="text-[9px] text-amber-500">缺少首帧</span>
+        </div>
+      )}
       <span className={`inline-flex text-[10px] px-2 py-0.5 rounded-full font-medium ${st === 'success' ? 'text-green-300 bg-green-900/40' : st === 'running' ? 'text-blue-300 bg-blue-900/40' : st === 'failed' ? 'text-red-300 bg-red-900/40' : 'text-gray-400 bg-gray-800'}`}>{st}</span>
       <span className={`inline-flex text-[10px] px-2 py-0.5 rounded-full font-medium ml-1 border ${rvCls}`}>{rv}</span>
       <span data-testid={`node-status-${n.shot_key}`} style={{ display: 'none' }}>{st}</span>
@@ -107,7 +127,7 @@ const CanvasToolbar: React.FC<{ instance: any; noData: boolean }> = ({ instance,
   );
 };
 
-export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefresh, onSelectNode }) => {
+export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefresh, onSelectNode, assets, shotBindings }) => {
   const noData = !instance || nodes.length === 0;
 
   const { rfNodes, rfEdges } = useMemo(() => {
@@ -115,7 +135,7 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
       const rfn: RFNode[] = nodes.map((n, i) => ({
         id: n.shot_key, type: 'workbenchNode',
         position: { x: i * 180, y: 60 },
-        data: { item: { ...n, shot_name: n.shot_name || DEFAULT_SHOTS.find(d => d.shot_key === n.shot_key)?.shot_name || n.shot_key }, onSelect: onSelectNode },
+        data: { item: { ...n, shot_name: n.shot_name || DEFAULT_SHOTS.find(d => d.shot_key === n.shot_key)?.shot_name || n.shot_key }, onSelect: onSelectNode, assets: assets || [], binding: (shotBindings || []).find(b => b.shotKey === n.shot_key) },
       }));
       const rfe: Edge[] = nodes.slice(0, -1).map((n, i) => ({
         id: `e-${n.shot_key}-${nodes[i + 1].shot_key}`, source: n.shot_key, target: nodes[i + 1].shot_key,
@@ -126,14 +146,14 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
     const rfn: RFNode[] = DEFAULT_SHOTS.map((s, i) => ({
       id: s.shot_key, type: 'workbenchNode',
       position: { x: i * 220, y: 60 },
-      data: { item: { ...s, status: 'pending', review_status: '-', bound_asset_role: null, bound_asset_source: null }, onSelect: () => {} },
+      data: { item: { ...s, status: 'pending', review_status: '-', bound_asset_role: null, bound_asset_source: null }, onSelect: onSelectNode, assets: assets || [], binding: (shotBindings || []).find(b => b.shotKey === s.shot_key) },
     }));
     const rfe: Edge[] = DEFAULT_SHOTS.slice(0, -1).map((s, i) => ({
       id: `e-${s.shot_key}-${DEFAULT_SHOTS[i + 1].shot_key}`, source: s.shot_key, target: DEFAULT_SHOTS[i + 1].shot_key,
       animated: false, style: { stroke: '#374151', strokeWidth: 2 },
     }));
     return { rfNodes: rfn, rfEdges: rfe };
-  }, [nodes, noData, onSelectNode]);
+  }, [nodes, noData, assets, shotBindings]);
 
   return (
     <div data-testid="production-canvas-view" className="h-full flex flex-col bg-[#0a0f1a] overflow-hidden">
@@ -143,12 +163,12 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-50 mt-16">
               <Package className="w-10 h-10 text-gray-700 mb-2" />
               <div className="text-sm text-gray-500">请先创建 video batch</div>
-              <div className="text-[11px] text-gray-700 mt-1">系统将按 6 个分镜节点生成 Mock 视频</div>
+              <div className="text-[11px] text-gray-700 mt-1">系统将按 6 个分镜节点生成模拟视频</div>
             </div>
           )}
           <ReactFlow
             nodes={rfNodes} edges={rfEdges} nodeTypes={nodeTypes}
-            defaultViewport={{ x: 0, y: 0, zoom: 0.75 }} minZoom={0.3} maxZoom={2}
+            fitView fitViewOptions={{ padding: 0.15, duration: 0 }} minZoom={0.3} maxZoom={2}
             nodesDraggable={false} nodesConnectable={false} elementsSelectable={true}
             proOptions={{ hideAttribution: true }}
           >

@@ -10,6 +10,9 @@ interface NodeDetail {
   prompt?: string; video_url?: string; cover_url?: string; error_message?: string;
 }
 
+interface WorkbenchAsset { id: string; filename: string; url: string; role: string; createdAt: number; }
+interface ShotFrameBinding { shotKey: string; startFrameAssetId?: string; endFrameAssetId?: string; referenceAssetIds?: string[]; }
+
 interface Props {
   node: NodeDetail | null;
   instanceId: string;
@@ -18,6 +21,10 @@ interface Props {
   modelAdapter?: string;
   batchStatus?: string;
   nodeCount?: number;
+  assets?: WorkbenchAsset[];
+  selectedBinding?: ShotFrameBinding;
+  getBoundAsset?: (assetId?: string) => WorkbenchAsset | undefined;
+  onBindShotFrame?: (shotKey: string, frameType: 'startFrame' | 'endFrame' | 'reference', assetId: string | null) => void;
 }
 
 const reviewBadgeCls: Record<string, string> = {
@@ -34,7 +41,7 @@ const statusBadgeCls: Record<string, string> = {
   failed: 'text-red-400 bg-red-900/30 border-red-500/30',
 };
 
-export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefresh, instance, modelAdapter, batchStatus, nodeCount }) => {
+export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefresh, instance, modelAdapter, batchStatus, nodeCount, assets, selectedBinding, getBoundAsset, onBindShotFrame }) => {
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -122,6 +129,85 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
               <div><div className="text-gray-600 mb-0.5">时长</div><div className="text-gray-300">{node.duration_seconds}秒</div></div>
               <div><div className="text-gray-600 mb-0.5">bound_asset_source</div><div className="text-gray-500 truncate">{node.bound_asset_source || '-'}</div></div>
             </div>
+
+            {/* 分镜素材绑定 */}
+            {onBindShotFrame && node.shot_key && (
+              <div className="bg-[#111827] border border-white/5 rounded-lg p-2.5 space-y-2">
+                <div className="text-gray-400 text-[10px] font-medium">分镜素材绑定</div>
+                {/* 首帧 */}
+                {(() => {
+                  const sfAsset = getBoundAsset?.(selectedBinding?.startFrameAssetId);
+                  return sfAsset ? (
+                    <div data-testid="start-frame-preview" className="flex items-center gap-2 bg-[#0a0f1a] rounded-lg p-1.5">
+                      <img src={sfAsset.url} className="w-10 h-10 rounded object-cover" />
+                      <div className="flex-1 min-w-0 text-[10px] text-green-400">首帧已绑定</div>
+                      <button onClick={() => onBindShotFrame(node.shot_key, 'startFrame', null)}
+                        className="text-red-400 text-[9px] hover:underline">解绑</button>
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      <div className="text-[10px] text-amber-400 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> 未绑定首帧图</div>
+                      {assets && assets.length > 0 ? (
+                        <select data-testid="bind-start-frame-select" value="" onChange={e => { if (e.target.value) onBindShotFrame(node.shot_key, 'startFrame', e.target.value); }}
+                          className="bg-[#0a0f1a] border border-white/10 rounded px-2 py-1 text-gray-300 text-[10px] w-full">
+                          <option value="">选择首帧图...</option>
+                          {assets.filter(a => a.role === 'start_frame' || a.role === 'product').map(a => <option key={a.id} value={a.id}>{a.filename}</option>)}
+                        </select>
+                      ) : <div className="text-gray-600 text-[9px]">请先在左侧素材包上传图片</div>}
+                    </div>
+                  );
+                })()}
+                {/* 尾帧 */}
+                {(() => {
+                  const efAsset = getBoundAsset?.(selectedBinding?.endFrameAssetId);
+                  return efAsset ? (
+                    <div data-testid="end-frame-preview" className="flex items-center gap-2 bg-[#0a0f1a] rounded-lg p-1.5">
+                      <img src={efAsset.url} className="w-10 h-10 rounded object-cover" />
+                      <div className="flex-1 min-w-0 text-[10px] text-green-400">尾帧已绑定</div>
+                      <button onClick={() => onBindShotFrame(node.shot_key, 'endFrame', null)}
+                        className="text-red-400 text-[9px] hover:underline">解绑</button>
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      <div className="text-[10px] text-gray-500">尾帧图（可选）</div>
+                      {assets && assets.length > 0 ? (
+                        <select data-testid="bind-end-frame-select" value="" onChange={e => { if (e.target.value) onBindShotFrame(node.shot_key, 'endFrame', e.target.value); }}
+                          className="bg-[#0a0f1a] border border-white/10 rounded px-2 py-1 text-gray-300 text-[10px] w-full">
+                          <option value="">选择尾帧图...</option>
+                          {assets.filter(a => a.role === 'end_frame' || a.role === 'logo' || a.role === 'product').map(a => <option key={a.id} value={a.id}>{a.filename}</option>)}
+                        </select>
+                      ) : null}
+                    </div>
+                  );
+                })()}
+                {/* 参考图 */}
+                {(() => {
+                  const refAssets = (selectedBinding?.referenceAssetIds || []).map(id => getBoundAsset?.(id)).filter(Boolean) as WorkbenchAsset[];
+                  return refAssets.length > 0 ? (
+                    <div data-testid="reference-image-preview" className="space-y-1">
+                      <div className="text-[10px] text-green-400">参考图已绑定 ({refAssets.length}张)</div>
+                      {refAssets.map(a => (
+                        <div key={a.id} className="flex items-center gap-2 bg-[#0a0f1a] rounded-lg p-1.5">
+                          <img src={a.url} className="w-8 h-8 rounded object-cover" />
+                          <span className="text-[9px] text-gray-400 truncate">{a.filename}</span>
+                          <button onClick={() => onBindShotFrame(node.shot_key, 'reference', null)}
+                            className="text-red-400 text-[9px] hover:underline ml-auto">解绑</button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <select data-testid="bind-reference-select" value="" onChange={e => { if (e.target.value) onBindShotFrame(node.shot_key, 'reference', e.target.value); }}
+                      className="bg-[#0a0f1a] border border-white/10 rounded px-2 py-1 text-gray-500 text-[10px] w-full">
+                      <option value="">绑定参考图...</option>
+                      {(assets || []).map(a => <option key={a.id} value={a.id}>{a.filename}</option>)}
+                    </select>
+                  );
+                })()}
+                {!selectedBinding?.startFrameAssetId && (
+                  <div data-testid="frame-binding-warning" className="text-amber-400 text-[9px]">请先为该分镜绑定首帧图</div>
+                )}
+              </div>
+            )}
 
             {node.video_url && (
               <div className="bg-[#0a0f1a] rounded-lg p-2.5 border border-white/5">
