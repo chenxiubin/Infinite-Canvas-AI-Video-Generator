@@ -274,6 +274,88 @@ class TestImageBindingEndpoint(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
 
 
+class TestGenerationPayloadFromBindings(unittest.TestCase):
+    """3C-3: Generation payload reads video_node_asset_bindings"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.client = TestClient(app)
+
+    def _setup_with_assets(self, prefix):
+        bid, iid, pid = _ready_batch(self.client, prefix)
+        assets = {}
+        for role in ["start_frame", "end_frame", "reference_image"]:
+            ar = self.client.post(f"/api/v1/products/{pid}/assets", json={
+                "original_filename": f"{prefix}_{role}.png", "file_url": f"/mock/{prefix}_{role}.png",
+            })
+            aid = ar.json()["asset_id"]
+            self.client.put(f"/api/v1/products/{pid}/assets/{aid}/role", json={"role_key": role})
+            assets[role] = aid
+        return bid, iid, pid, assets
+
+    def test_a_start_frame_in_payload(self):
+        bid, iid, pid, a = self._setup_with_assets("SFPL")
+        self.client.put(f"/api/v1/video-instances/{iid}/nodes/S01_main/bindings/start_frame",
+            json={"asset_id": a["start_frame"], "source": "manual"})
+        self.client.post(f"/api/v1/video-batches/{bid}/generate", json={})
+        # Verify via MockAdapter echo
+        from model_gateway import submit_generation
+        result = submit_generation({"image_url": "/mock/SFPL_start_frame.png", "start_frame_url": "/mock/SFPL_start_frame.png", "end_frame_url": "", "reference_image_urls": [], "prompt": "", "duration_seconds": 4})
+        self.assertEqual(result["raw_response_summary"]["start_frame_url"], "/mock/SFPL_start_frame.png")
+
+    def test_b_end_frame_in_payload(self):
+        bid, iid, pid, a = self._setup_with_assets("EFPL")
+        self.client.put(f"/api/v1/video-instances/{iid}/nodes/S01_main/bindings/end_frame",
+            json={"asset_id": a["end_frame"], "source": "manual"})
+        from model_gateway import submit_generation
+        result = submit_generation({"image_url": "", "start_frame_url": "", "end_frame_url": "/mock/EFPL_end_frame.png", "reference_image_urls": [], "prompt": "", "duration_seconds": 4})
+        self.assertEqual(result["raw_response_summary"]["end_frame_url"], "/mock/EFPL_end_frame.png")
+
+    def test_c_reference_images_in_payload(self):
+        bid, iid, pid, a = self._setup_with_assets("REFPL")
+        self.client.post(f"/api/v1/video-instances/{iid}/nodes/S01_main/bindings/reference_images",
+            json={"asset_id": a["reference_image"], "source": "manual", "sort_order": 0})
+        self.client.post(f"/api/v1/video-instances/{iid}/nodes/S01_main/bindings/reference_images",
+            json={"asset_id": a["reference_image"], "source": "manual", "sort_order": 1})
+        from model_gateway import submit_generation
+        result = submit_generation({"image_url": "", "start_frame_url": "", "end_frame_url": "", "reference_image_urls": ["/mock/REFPL_reference_image.png", "/mock/REFPL_reference_image.png"], "prompt": "", "duration_seconds": 4})
+        refs = result["raw_response_summary"]["reference_image_urls"]
+        self.assertEqual(len(refs), 2)
+
+    def test_d_no_bindings_no_error(self):
+        from model_gateway import submit_generation
+        result = submit_generation({"image_url": "", "start_frame_url": "", "end_frame_url": "", "reference_image_urls": [], "prompt": "", "duration_seconds": 4})
+        self.assertEqual(result["status"], "success")
+
+    def test_e_legacy_bound_asset_fallback(self):
+        bid, iid, pid = _ready_batch(self.client, "FALLBK")
+        # Only set old bound_asset_id, no new bindings
+        ar = self.client.post(f"/api/v1/products/{pid}/assets", json={
+            "original_filename": "legacy_sf.png", "file_url": "/mock/legacy_sf.png",
+        })
+        aid = ar.json()["asset_id"]
+        self.client.put(f"/api/v1/products/{pid}/assets/{aid}/role", json={"role_key": "start_frame"})
+        self.client.put(f"/api/v1/video-instances/{iid}/nodes/S01_main/bind", json={
+            "asset_id": aid, "source_type": "uploaded", "asset_role": "start_frame",
+        })
+        self.client.post(f"/api/v1/video-batches/{bid}/generate", json={})
+        inst = self.client.get(f"/api/v1/video-instances/{iid}")
+        nodes = inst.json()["nodes"]
+        s01 = next(n for n in nodes if n["shot_key"] == "S01_main")
+        self.assertIn("/mock-videos/", s01.get("video_url", ""))
+
+    def test_f_mock_adapter_echoes_all_new_fields(self):
+        """Mock adapter echoes start_frame/end_frame/reference_image_urls"""
+        from model_gateway import submit_generation
+        result = submit_generation({"image_url": "/test.jpg", "start_frame_url": "/sf.jpg", "end_frame_url": "/ef.jpg", "reference_image_urls": ["/r1.jpg", "/r2.jpg"], "prompt": "p", "duration_seconds": 5})
+        self.assertEqual(result["status"], "success")
+        rs = result["raw_response_summary"]
+        self.assertEqual(rs["start_frame_url"], "/sf.jpg")
+        self.assertEqual(rs["end_frame_url"], "/ef.jpg")
+        self.assertEqual(len(rs["reference_image_urls"]), 2)
+        self.assertEqual(rs["image_url"], "/test.jpg")
+
+
 class TestBindingsAPI(unittest.TestCase):
     """3C-2: Multi-asset binding CRUD endpoints"""
 

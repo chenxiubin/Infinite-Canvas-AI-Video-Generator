@@ -183,6 +183,26 @@ def run_mock_generation_for_node(
         pa = cursor.fetchone()
         bound_asset_url = pa["file_url"] if pa else ""
 
+    # Query video_node_asset_bindings for start_frame / end_frame / reference_image URLs
+    sf_url = ""
+    ef_url = ""
+    ref_urls = []
+    cursor.execute(
+        """SELECT vnab.binding_type, vnab.sort_order, pa.file_url
+           FROM video_node_asset_bindings vnab
+           JOIN product_assets pa ON pa.id = vnab.asset_id
+           WHERE vnab.instance_id = ? AND vnab.shot_key = ?
+           ORDER BY vnab.binding_type, vnab.sort_order""",
+        (node.get("instance_id"), node["shot_key"]),
+    )
+    for row in cursor.fetchall():
+        if row["binding_type"] == "start_frame":
+            sf_url = row["file_url"]
+        elif row["binding_type"] == "end_frame":
+            ef_url = row["file_url"]
+        elif row["binding_type"] == "reference_image":
+            ref_urls.append(row["file_url"])
+
     # Determine final status
     if force_status:
         final_status = force_status
@@ -219,7 +239,8 @@ def run_mock_generation_for_node(
         from model_gateway import submit_generation as gateway_submit
 
     gateway_req = {
-        "node_id": node_id, "image_url": bound_asset_url, "start_frame_url": bound_asset_url,
+        "node_id": node_id, "image_url": sf_url or bound_asset_url, "start_frame_url": sf_url or bound_asset_url,
+        "end_frame_url": ef_url or "", "reference_image_urls": ref_urls,
         "prompt": node.get("prompt", ""), "duration_seconds": node.get("duration_seconds", 4),
         "shot_key": shot_key, "model_adapter": model_adapter,
         "model_name": model_name_override or ("mock_image_to_video" if model_adapter == "mock" else None),
