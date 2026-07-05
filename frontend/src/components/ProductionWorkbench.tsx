@@ -151,6 +151,18 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
     } catch (e: any) { setError(e?.message || '生成失败'); }
     finally { setGeneratingShotKeys(prev => prev.filter(k => k !== shotKey)); }
   };
+  const handleRegenerateShot = async (nodeId: string, shotKey: string) => {
+    if (!nodeId) return;
+    setGeneratingShotKeys(prev => [...prev, shotKey]);
+    try {
+      const config = (storyboardConfigs || {})[shotKey] || getDefaultStoryboardConfig(shotKey, productLine, motionShotVersion);
+      const prompt = buildFinalPrompt(config);
+      // Force regenerate for rejected/failed nodes
+      const result = await api.generateVideoNode(nodeId, { prompt, force: true });
+      setNodes(prev => prev.map(n => n.shot_key === shotKey ? { ...n, status: result.status, video_url: result.video_url, cover_url: result.cover_url, review_status: result.status === 'success' ? 'pending' : n.review_status } : n));
+    } catch (e: any) { setError(e?.message || '重新生成失败'); }
+    finally { setGeneratingShotKeys(prev => prev.filter(k => k !== shotKey)); }
+  };
   const selectedBinding = shotBindings.find(b => b.shotKey === selectedNode?.shot_key);
   const getBoundAsset = (assetId?: string) => assets.find(a => a.id === assetId);
 
@@ -208,8 +220,8 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
             onBindShotFrame={handleBindShotFrame}
             storyboardConfigs={storyboardConfigs} onUpdateStoryboardConfig={(sk, c) => setStoryboardConfigs(prev => ({...prev, [sk]: c}))}
             motionShotVersion={motionShotVersion} onSetMotionShotVersion={setMotionShotVersion}
-            onGenerateSingleShot={handleGenerateSingleShot} generatingShotKeys={generatingShotKeys}
-            productLine={productLine} />
+            onGenerateSingleShot={handleGenerateSingleShot} onRegenerateShot={handleRegenerateShot}
+            generatingShotKeys={generatingShotKeys} productLine={productLine} />
         </div>
       </div>
     </div>

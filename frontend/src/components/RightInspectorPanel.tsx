@@ -7,7 +7,7 @@ interface NodeDetail {
   node_id: string; shot_key: string; shot_name: string; shot_order: number;
   duration_seconds: number; required_asset_role: string;
   bound_asset_id?: string; bound_asset_role?: string; bound_asset_source?: string;
-  status: string; review_status?: string;
+  status: string; review_status?: string; review_reason?: string;
   prompt?: string; video_url?: string; cover_url?: string; error_message?: string;
 }
 
@@ -27,6 +27,7 @@ interface Props {
   getBoundAsset?: (assetId?: string) => WorkbenchAsset | undefined;
   onBindShotFrame?: (shotKey: string, frameType: 'startFrame' | 'endFrame' | 'reference', assetId: string | null) => void;
   onGenerateSingleShot?: (nodeId: string, shotKey: string) => void;
+  onRegenerateShot?: (nodeId: string, shotKey: string) => void;
   generatingShotKeys?: string[];
   storyboardConfigs?: Record<string, StoryboardPromptConfig>;
   productLine?: 'desk_calendar' | 'wall_calendar';
@@ -49,7 +50,7 @@ const statusBadgeCls: Record<string, string> = {
   failed: 'text-red-400 bg-red-900/30 border-red-500/30',
 };
 
-export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefresh, instance, modelAdapter, batchStatus, nodeCount, assets, selectedBinding, getBoundAsset, onBindShotFrame, onGenerateSingleShot, generatingShotKeys, storyboardConfigs, onUpdateStoryboardConfig, motionShotVersion, onSetMotionShotVersion, productLine }) => {
+export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefresh, instance, modelAdapter, batchStatus, nodeCount, assets, selectedBinding, getBoundAsset, onBindShotFrame, onGenerateSingleShot, onRegenerateShot, generatingShotKeys, storyboardConfigs, onUpdateStoryboardConfig, motionShotVersion, onSetMotionShotVersion, productLine }) => {
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -131,6 +132,9 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
               <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium border ${stCls}`}>{node.status}</span>
               <span data-testid="canvas-detail-review-status" className={`text-[10px] px-2 py-0.5 rounded-full font-medium border ${rvCls}`}>审核: {rv}</span>
             </div>
+            {node.review_status === 'rejected' && node.review_reason && (
+              <div data-testid="single-shot-rejected-reason" className="text-red-400 text-[9px]">{node.review_reason}</div>
+            )}
 
             <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-[10px] bg-[#0a0f1a] rounded-lg p-2.5 border border-white/5">
               <div><div className="text-gray-600 mb-0.5">状态</div><div data-testid="canvas-detail-status" className="text-gray-200">{node.status}</div></div>
@@ -359,6 +363,13 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
                   </button>
                 </div>
               </>
+            )}
+            {node.status === 'success' && node.review_status === 'rejected' && onRegenerateShot && (
+              <button data-testid="single-shot-regenerate-button"
+                onClick={() => onRegenerateShot(node.node_id, node.shot_key)}
+                className="flex items-center justify-center gap-1.5 bg-orange-900/40 hover:bg-orange-900/60 text-orange-300 text-xs px-3 py-2 rounded-lg w-full transition-colors border border-orange-700/20 font-medium mt-2">
+                <RotateCcw className="w-3 h-3" /> 重新生成此分镜
+              </button>
             )}
             {node.status !== 'success' && node.status !== 'failed' && (
               <div className="space-y-1.5">
