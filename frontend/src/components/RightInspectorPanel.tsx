@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import * as api from '../api/mvp3';
-import { Eye, Check, X, RotateCcw, AlertCircle, Activity, Cpu, Layers, FileVideo } from 'lucide-react';
+import { Eye, Check, X, RotateCcw, AlertCircle, Activity, Cpu, Layers, FileVideo, Settings, Edit3 } from 'lucide-react';
+import { type StoryboardPromptConfig, getDefaultStoryboardConfig, buildFinalPrompt, buildStandardShotPrompt, SHOT_SIZE_OPTIONS, CAMERA_MOVE_OPTIONS, LIGHTING_MOOD_OPTIONS, MOTION_INTENSITY_OPTIONS, DEFOCUS_LEVEL_OPTIONS, SAFETY_SUFFIX } from '../lib/storyboardPrompt';
 
 interface NodeDetail {
   node_id: string; shot_key: string; shot_name: string; shot_order: number;
@@ -25,6 +26,10 @@ interface Props {
   selectedBinding?: ShotFrameBinding;
   getBoundAsset?: (assetId?: string) => WorkbenchAsset | undefined;
   onBindShotFrame?: (shotKey: string, frameType: 'startFrame' | 'endFrame' | 'reference', assetId: string | null) => void;
+  storyboardConfigs?: Record<string, StoryboardPromptConfig>;
+  onUpdateStoryboardConfig?: (shotKey: string, config: StoryboardPromptConfig) => void;
+  motionShotVersion?: 'primary' | 'backup';
+  onSetMotionShotVersion?: (v: 'primary' | 'backup') => void;
 }
 
 const reviewBadgeCls: Record<string, string> = {
@@ -41,10 +46,11 @@ const statusBadgeCls: Record<string, string> = {
   failed: 'text-red-400 bg-red-900/30 border-red-500/30',
 };
 
-export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefresh, instance, modelAdapter, batchStatus, nodeCount, assets, selectedBinding, getBoundAsset, onBindShotFrame }) => {
+export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefresh, instance, modelAdapter, batchStatus, nodeCount, assets, selectedBinding, getBoundAsset, onBindShotFrame, storyboardConfigs, onUpdateStoryboardConfig, motionShotVersion, onSetMotionShotVersion }) => {
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [inspectorMode, setInspectorMode] = useState<'basic' | 'advanced'>('basic');
 
   const doAction = async (fn: () => Promise<any>) => {
     try { setError(''); setLoading(true); await fn(); await onRefresh(); } catch (e: any) { setError(e?.message || String(e)); } finally { setLoading(false); }
@@ -130,10 +136,100 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
               <div><div className="text-gray-600 mb-0.5">bound_asset_source</div><div className="text-gray-500 truncate">{node.bound_asset_source || '-'}</div></div>
             </div>
 
+            {/* 分镜属性面板 */}
+            {onUpdateStoryboardConfig && node.shot_key && (() => {
+              const sk = node.shot_key;
+              const config = (storyboardConfigs || {})[sk] || getDefaultStoryboardConfig(sk);
+              const update = (c: StoryboardPromptConfig) => onUpdateStoryboardConfig(sk, c);
+              const finalPrompt = buildFinalPrompt(config);
+              const safetyMoves = ['推进', '拉远'];
+              return (
+                <div className="bg-[#111827] border border-white/5 rounded-lg p-2.5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-400 text-[10px] font-medium flex items-center gap-1"><Settings className="w-3 h-3" /> 分镜属性</span>
+                    <div className="flex gap-0.5 bg-[#0a0f1a] rounded p-0.5">
+                      <button data-testid={`inspector-mode-basic-${sk}`} onClick={() => setInspectorMode('basic')}
+                        className={`text-[9px] px-2 py-0.5 rounded ${inspectorMode === 'basic' ? 'bg-purple-600/50 text-purple-200' : 'text-gray-500 hover:text-gray-300'}`}>常规</button>
+                      <button data-testid={`inspector-mode-advanced-${sk}`} onClick={() => setInspectorMode('advanced')}
+                        className={`text-[9px] px-2 py-0.5 rounded ${inspectorMode === 'advanced' ? 'bg-purple-600/50 text-purple-200' : 'text-gray-500 hover:text-gray-300'}`}>高级</button>
+                    </div>
+                  </div>
+                  {inspectorMode === 'basic' ? (
+                    <div className="space-y-1.5">
+                      {[
+                        { label: '景别', key: 'shot_size', opts: SHOT_SIZE_OPTIONS },
+                        { label: '运镜方式', key: 'camera_move', opts: CAMERA_MOVE_OPTIONS },
+                        { label: '光线氛围', key: 'lighting_mood', opts: LIGHTING_MOOD_OPTIONS },
+                        { label: '运动幅度', key: 'motion_intensity', opts: MOTION_INTENSITY_OPTIONS },
+                        { label: '背景虚化', key: 'defocus_level', opts: DEFOCUS_LEVEL_OPTIONS },
+                      ].map(f => (
+                        <div key={f.key} className="flex items-center gap-2">
+                          <span className="text-gray-500 text-[9px] w-14 flex-shrink-0">{f.label}</span>
+                          <select data-testid={`storyboard-${f.key}-${sk}`} value={(config as any)[f.key] || ''} disabled={config.is_prompt_customized}
+                            onChange={e => update({ ...config, [f.key]: e.target.value, is_prompt_customized: false })}
+                            className={`bg-[#0a0f1a] border border-white/10 rounded px-2 py-1 text-gray-200 text-[10px] flex-1 ${config.is_prompt_customized ? 'opacity-30' : ''}`}>
+                            {f.opts.map(o => <option key={o} value={o}>{o}</option>)}
+                          </select>
+                        </div>
+                      ))}
+                      {safetyMoves.includes(config.camera_move) && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-gray-500 text-[9px] w-14 flex-shrink-0">安全边距</span>
+                          <select data-testid={`storyboard-safety_margin-${sk}`} value={config.safety_margin} disabled={config.is_prompt_customized}
+                            onChange={e => update({ ...config, safety_margin: parseInt(e.target.value), is_prompt_customized: false })}
+                            className="bg-[#0a0f1a] border border-white/10 rounded px-2 py-1 text-gray-200 text-[10px] flex-1">
+                            {[5, 8, 10, 15, 20].map(v => <option key={v} value={v}>{v}%</option>)}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <textarea data-testid={`storyboard-custom-prompt-${sk}`} value={config.custom_prompt_override || buildStandardShotPrompt(config)}
+                        onChange={e => update({ ...config, custom_prompt_override: e.target.value, is_prompt_customized: true })}
+                        className="bg-[#0a0f1a] border border-white/10 rounded px-2 py-1 text-gray-200 text-[10px] w-full h-20 resize-none"
+                        placeholder="自定义提示词..." />
+                      <div className="flex items-center gap-2">
+                        <button data-testid={`storyboard-reset-prompt-${sk}`}
+                          onClick={() => update({ ...getDefaultStoryboardConfig(sk), custom_prompt_override: undefined, is_prompt_customized: false })}
+                          className="text-[9px] text-purple-400 hover:text-purple-300">重置为标准模板</button>
+                        <label className="flex items-center gap-1 text-[9px] text-gray-500 ml-auto">
+                          <input type="checkbox" data-testid={`storyboard-safety-suffix-${sk}`} checked={config.safety_suffix_enabled}
+                            onChange={e => update({ ...config, safety_suffix_enabled: e.target.checked })} className="w-3 h-3" />
+                          安全约束
+                        </label>
+                      </div>
+                      <div className="text-[9px] text-gray-600 bg-[#0a0f1a] rounded p-1.5 break-all leading-relaxed">
+                        <span className="text-gray-500">提交提示词：</span>{finalPrompt}
+                      </div>
+                    </div>
+                  )}
+                  {config.is_prompt_customized && (
+                    <div className="text-[8px] text-amber-400 flex items-center gap-1"><Edit3 className="w-2.5 h-2.5" /> 已自定义提示词，常规字段已锁定</div>
+                  )}
+                </div>
+              );
+            })()}
+
             {/* 分镜素材绑定 */}
             {onBindShotFrame && node.shot_key && (
               <div className="bg-[#111827] border border-white/5 rounded-lg p-2.5 space-y-2">
-                <div className="text-gray-400 text-[10px] font-medium">分镜素材绑定</div>
+                <div data-testid="motion-shot-version-panel" className="bg-[#111827] border border-white/5 rounded-lg p-2.5 space-y-1.5">
+                <div className="text-gray-400 text-[10px] font-medium">S04 动态展示方案</div>
+                <div className="text-[8px] text-gray-600">该设置为模板级配置，影响当前模板下所有产品链</div>
+                <select value={motionShotVersion || 'primary'}
+                  onChange={e => onSetMotionShotVersion?.(e.target.value as 'primary' | 'backup')}
+                  className="bg-[#0a0f1a] border border-white/10 rounded px-2 py-1 text-gray-200 text-[10px] w-full">
+                  <option value="primary">主方案：翻页/动作定格</option>
+                  <option value="backup">备用方案：尺寸参考同框</option>
+                </select>
+                <div className="text-[8px] text-gray-500">
+                  {(motionShotVersion || 'primary') === 'primary'
+                    ? '提示词方向：中景，静止或极轻微平移运镜，捕捉动作定格瞬间的动感，轻微运动幅度'
+                    : '提示词方向：中景，产品与参照物同框展示尺寸对比，静止或轻微推进，轻微运动幅度'}
+                </div>
+              </div>
+              <div className="text-gray-400 text-[10px] font-medium">分镜素材绑定</div>
                 {/* 首帧 */}
                 {(() => {
                   const sfAsset = getBoundAsset?.(selectedBinding?.startFrameAssetId);

@@ -32,11 +32,11 @@ interface Props {
 
 const DEFAULT_SHOTS = [
   { shot_key: 'S01_main', shot_name: '主图-正面', shot_order: 1, duration_seconds: 4, required_asset_role: 'main' },
-  { shot_key: 'S02_detail1', shot_name: '细节-纸张质感', shot_order: 2, duration_seconds: 3, required_asset_role: 'detail1' },
-  { shot_key: 'S03_detail2', shot_name: '细节-装订挂绳', shot_order: 3, duration_seconds: 3, required_asset_role: 'detail2' },
-  { shot_key: 'S04_motion', shot_name: '运镜-整体翻动特写', shot_order: 4, duration_seconds: 5, required_asset_role: 'motion' },
-  { shot_key: 'S05_scene', shot_name: '场景-挂墙陈列', shot_order: 5, duration_seconds: 5, required_asset_role: 'scene' },
-  { shot_key: 'S06_brand', shot_name: '尾帧-LOGO', shot_order: 6, duration_seconds: 4, required_asset_role: 'brand' },
+  { shot_key: 'S02_detail1', shot_name: '细节特写-材质', shot_order: 2, duration_seconds: 3, required_asset_role: 'detail1' },
+  { shot_key: 'S03_detail2', shot_name: '细节特写-结构', shot_order: 3, duration_seconds: 3, required_asset_role: 'detail2' },
+  { shot_key: 'S04_motion', shot_name: '运镜展示', shot_order: 4, duration_seconds: 5, required_asset_role: 'motion' },
+  { shot_key: 'S05_scene', shot_name: '场景陈列', shot_order: 5, duration_seconds: 5, required_asset_role: 'scene' },
+  { shot_key: 'S06_brand', shot_name: '收尾呼应', shot_order: 6, duration_seconds: 4, required_asset_role: 'brand' },
 ];
 
 const statusColors: Record<string, string> = { pending: 'border-gray-600/50 bg-[#141a24]', running: 'border-blue-500/50 bg-blue-950/20', success: 'border-green-500/50 bg-green-950/15', failed: 'border-red-500/50 bg-red-950/20' };
@@ -74,6 +74,9 @@ const WorkbenchShotNode: React.FC<{ id: string; data: { item: any; onSelect?: (n
       <span className={`inline-flex text-[10px] px-2 py-0.5 rounded-full font-medium ${st==='success'?'text-green-300 bg-green-900/40':st==='running'?'text-blue-300 bg-blue-900/40':st==='failed'?'text-red-300 bg-red-900/40':'text-gray-400 bg-gray-800'}`}>{st}</span>
       <span className={`inline-flex text-[10px] px-2 py-0.5 rounded-full font-medium ml-1 border ${rvCls}`}>{rv}</span>
       <span data-testid={`node-status-${n.shot_key}`} style={{display:'none'}}>{st}</span>
+      {n.is_prompt_customized && <div className="text-[7px] text-amber-400 mt-1">已自定义</div>}
+      {n.safety_suffix_enabled !== false && <div className="text-[7px] text-gray-500">安全约束</div>}
+      <div className="text-[8px] text-gray-600 truncate">{n.camera_move || ''}{n.motion_intensity ? ' · ' + n.motion_intensity : ''}</div>
       <div className="mt-2.5 space-y-1 text-[10px]"><div data-testid={`canvas-node-status-${n.shot_key}`} className="text-gray-500">状态: <span className="text-gray-300">{st}</span></div><div data-testid={`canvas-node-review-${n.shot_key}`}>审核: {rv}</div><div className="text-gray-600">素材: {n.bound_asset_role||'-'}</div><div className="text-gray-700 text-[9px] truncate">来源: {n.bound_asset_source||'-'}</div></div>
     </div>
   );

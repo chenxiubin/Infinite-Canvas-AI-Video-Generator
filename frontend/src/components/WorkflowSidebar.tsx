@@ -12,6 +12,7 @@ interface Props {
   onGenerate: () => void; onMerge: () => void; onApproveAll: () => void; onExport: () => void;
   onSetModelAdapter: (k: string) => void; onSetViewMode: (m: 'form' | 'canvas') => void; onClearError: () => void;
   assets?: WorkbenchAsset[]; onUploadAssets?: (files: FileList) => void; onUpdateAssetRole?: (assetId: string, role: string) => void;
+  onSelectShot?: (shotKey: string) => void; selectedShotKey?: string | null;
 }
 
 const SectionCard: React.FC<{ title: string; icon: React.ReactNode; children: React.ReactNode; testid?: string }> =
@@ -120,6 +121,28 @@ export const WorkflowSidebar: React.FC<Props> = (p) => (
           <div data-testid="selected-model-adapter" className="text-gray-600 text-[9px] px-1">当前：{p.modelAdapter}</div>
         </div>
       </SectionCard>
+
+      {/* 分镜列表 */}
+      {p.onSelectShot && (
+        <div className="bg-[#111827] border border-white/5 rounded-xl overflow-hidden">
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 bg-[#0d1117]">
+            <span className="text-gray-500"><Layers className="w-3 h-3" /></span>
+            <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">分镜列表</span>
+          </div>
+          <div className="p-2 space-y-0.5">
+            {['S01_main','S02_detail1','S03_detail2','S04_motion','S05_scene','S06_brand'].map(sk => {
+              const names: Record<string,string> = {S01_main:'主图-正面',S02_detail1:'细节特写-材质',S03_detail2:'细节特写-结构',S04_motion:'运镜展示',S05_scene:'场景陈列',S06_brand:'收尾呼应'};
+              return (
+                <button key={sk} data-testid={`workflow-shot-${sk}`}
+                  onClick={() => p.onSelectShot?.(sk)}
+                  className={`text-[10px] px-2 py-1 rounded w-full text-left transition-colors ${p.selectedShotKey === sk ? 'bg-purple-900/40 text-purple-300 border border-purple-500/30' : 'text-gray-500 hover:bg-white/5 hover:text-gray-300'}`}>
+                  {sk} · {names[sk] || sk}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* 图片素材包 */}
       <SectionCard title="图片素材包" icon={<Image className="w-3 h-3" />} testid="sidebar-section-assets">

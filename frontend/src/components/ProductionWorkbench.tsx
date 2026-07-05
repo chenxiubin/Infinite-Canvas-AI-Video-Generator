@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as api from '../api/mvp3';
+import { type StoryboardPromptConfig, getDefaultStoryboardConfig, buildFinalPrompt } from '../lib/storyboardPrompt';
 import { WorkbenchHeader } from './WorkbenchHeader';
 import { WorkflowSidebar } from './WorkflowSidebar';
 import { ProductionCanvasView } from './ProductionCanvasView';
@@ -27,6 +28,8 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
   const [assets, setAssets] = useState<WorkbenchAsset[]>([]);
   const [shotBindings, setShotBindings] = useState<ShotFrameBinding[]>([]);
   const [connectingAssetId, setConnectingAssetId] = useState<string | null>(null);
+  const [storyboardConfigs, setStoryboardConfigs] = useState<Record<string, StoryboardPromptConfig>>({});
+  const [motionShotVersion, setMotionShotVersion] = useState<'primary' | 'backup'>('primary');
 
   const batchIdRef = useRef(''); const instanceRef = useRef<InstanceData | null>(null);
   useEffect(() => { batchIdRef.current = batchId; }, [batchId]);
@@ -61,7 +64,7 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
       await api.exportInstance(ai.instance_id);const ei=await api.getVideoInstance(ai.instance_id);setInstance(ei);setNodes(ei.nodes||[]);addLog('mock export completed');
     }catch(e){showError(e);addLog(`ERROR: ${e?.message||e}`);}finally{setLoading('');}
   };
-  const handleReset = () => { assets.forEach(a => { if (a.url?.startsWith('blob:')) URL.revokeObjectURL(a.url); }); setProductId('');setChecklist(null);setBatchId('');setInstance(null);setNodes([]);setSelTemplateId('');setError('');setDemoLog([]);batchIdRef.current='';instanceRef.current=null;setSelectedNodeId(null);setAssets([]);setShotBindings([]);setConnectingAssetId(null); };
+  const handleReset = () => { assets.forEach(a => { if (a.url?.startsWith('blob:')) URL.revokeObjectURL(a.url); }); setProductId('');setChecklist(null);setBatchId('');setInstance(null);setNodes([]);setSelTemplateId('');setError('');setDemoLog([]);batchIdRef.current='';instanceRef.current=null;setSelectedNodeId(null);setAssets([]);setShotBindings([]);setConnectingAssetId(null);setStoryboardConfigs({});setMotionShotVersion('primary'); };
   const assetsRef = useRef(assets); assetsRef.current = assets;
   useEffect(() => { return () => { assetsRef.current.forEach(a => { if (a.url?.startsWith('blob:')) URL.revokeObjectURL(a.url); }); }; }, []);
 
@@ -168,6 +171,7 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
             onMerge={handleMerge} onApproveAll={handleApproveAll} onExport={handleExport}
             onSetModelAdapter={setModelAdapter} onSetViewMode={setViewMode} onClearError={clearError}
             assets={assets} onUploadAssets={handleUploadAssets} onUpdateAssetRole={handleUpdateAssetRole}
+            onSelectShot={(sk) => setSelectedNodeId(sk)} selectedShotKey={selectedNodeId}
           />
         </div>
 
@@ -187,7 +191,9 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
         <div className="min-h-0 overflow-hidden">
           <RightInspectorPanel node={selectedNode} instanceId={instance?.instance_id||''} onRefresh={refreshAll}
             assets={assets} selectedBinding={selectedBinding} getBoundAsset={getBoundAsset}
-            onBindShotFrame={handleBindShotFrame} />
+            onBindShotFrame={handleBindShotFrame}
+            storyboardConfigs={storyboardConfigs} onUpdateStoryboardConfig={(sk, c) => setStoryboardConfigs(prev => ({...prev, [sk]: c}))}
+            motionShotVersion={motionShotVersion} onSetMotionShotVersion={setMotionShotVersion} />
         </div>
       </div>
     </div>
