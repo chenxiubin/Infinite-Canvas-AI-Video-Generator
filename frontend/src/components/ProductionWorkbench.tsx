@@ -31,6 +31,7 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
   const [storyboardConfigs, setStoryboardConfigs] = useState<Record<string, StoryboardPromptConfig>>({});
   const [motionShotVersion, setMotionShotVersion] = useState<'primary' | 'backup'>('primary');
 	const [productLine, setProductLine] = useState<'desk_calendar' | 'wall_calendar'>('desk_calendar');
+	const [generatingShotKeys, setGeneratingShotKeys] = useState<string[]>([]);
 
   const batchIdRef = useRef(''); const instanceRef = useRef<InstanceData | null>(null);
   useEffect(() => { batchIdRef.current = batchId; }, [batchId]);
@@ -139,6 +140,17 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
       }
     } catch (e: any) { setError(e?.message || '绑定失败'); }
   };
+  const handleGenerateSingleShot = async (nodeId: string, shotKey: string) => {
+    if (!nodeId) return;
+    setGeneratingShotKeys(prev => [...prev, shotKey]);
+    try {
+      const config = (storyboardConfigs || {})[shotKey] || getDefaultStoryboardConfig(shotKey, productLine, motionShotVersion);
+      const prompt = buildFinalPrompt(config);
+      const result = await api.generateVideoNode(nodeId, { prompt });
+      setNodes(prev => prev.map(n => n.shot_key === shotKey ? { ...n, status: result.status, video_url: result.video_url, cover_url: result.cover_url } : n));
+    } catch (e: any) { setError(e?.message || '生成失败'); }
+    finally { setGeneratingShotKeys(prev => prev.filter(k => k !== shotKey)); }
+  };
   const selectedBinding = shotBindings.find(b => b.shotKey === selectedNode?.shot_key);
   const getBoundAsset = (assetId?: string) => assets.find(a => a.id === assetId);
 
@@ -195,7 +207,9 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
             assets={assets} selectedBinding={selectedBinding} getBoundAsset={getBoundAsset}
             onBindShotFrame={handleBindShotFrame}
             storyboardConfigs={storyboardConfigs} onUpdateStoryboardConfig={(sk, c) => setStoryboardConfigs(prev => ({...prev, [sk]: c}))}
-            motionShotVersion={motionShotVersion} onSetMotionShotVersion={setMotionShotVersion} />
+            motionShotVersion={motionShotVersion} onSetMotionShotVersion={setMotionShotVersion}
+            onGenerateSingleShot={handleGenerateSingleShot} generatingShotKeys={generatingShotKeys}
+            productLine={productLine} />
         </div>
       </div>
     </div>

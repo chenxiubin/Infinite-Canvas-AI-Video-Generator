@@ -2529,10 +2529,12 @@ class VideoNodeGenerateRequest(BaseModel):
     force: bool = False
     force_status: Optional[str] = None
     model_adapter: str = "mock"
+    prompt: Optional[str] = None
 
 class VideoNodeRetryRequest(BaseModel):
     force_status: Optional[str] = None
     model_adapter: str = "mock"
+    prompt: Optional[str] = None
 
 # --- Batch Generate ---
 
@@ -2667,6 +2669,8 @@ def generate_video_node(node_id: str, req: VideoNodeGenerateRequest, db: sqlite3
         pass  # normal generate
 
     node_dict = dict(node)
+    if req.prompt is not None:
+        node_dict["prompt"] = req.prompt
     result = run_mock_generation_for_node(
         cursor, node_dict,
         batch_id=node["batch_id"],
@@ -2712,6 +2716,8 @@ def retry_video_node(node_id: str, req: VideoNodeRetryRequest, db: sqlite3.Conne
         raise HTTPException(status_code=400, detail="Archived batch cannot be retried")
 
     node_dict = dict(node)
+    if req.prompt is not None:
+        node_dict["prompt"] = req.prompt
     result = run_mock_generation_for_node(
         cursor, node_dict,
         batch_id=node["batch_id"],

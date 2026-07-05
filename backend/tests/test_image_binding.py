@@ -481,3 +481,61 @@ class TestBindingsAPI(unittest.TestCase):
             "asset_id": ef_aid, "source_type": "uploaded", "asset_role": "end_frame",
         })
         self.assertEqual(r.status_code, 400)
+
+
+class TestPromptOverride(unittest.TestCase):
+    """Verify single-shot generate endpoint accepts optional prompt body."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.client = TestClient(app)
+
+    def test_a_generate_with_prompt_override(self):
+        bid, iid, pid = _ready_batch(self.client, "PROMPT")
+        inst = self.client.get(f"/api/v1/video-instances/{iid}")
+        nodes = inst.json()["nodes"]
+        s01 = next(n for n in nodes if n["shot_key"] == "S01_main")
+        custom_prompt = "前端自定义提示词覆盖测试，挂历悬挂中间状态定格瞬间，保持产品结构一致"
+        r = self.client.post(f"/api/v1/video-nodes/{s01['node_id']}/generate",
+            json={"prompt": custom_prompt, "model_adapter": "mock"})
+        self.assertEqual(r.status_code, 200)
+        result = r.json()
+        self.assertEqual(result["status"], "success")
+        self.assertIsNotNone(result.get("video_url"))
+        import sqlite3
+        db_path = os.environ.get("TEST_DATABASE_PATH", "test.sqlite3")
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT prompt FROM video_generation_jobs WHERE node_id=? ORDER BY created_at DESC LIMIT 1",
+                    (s01['node_id'],))
+        row = cur.fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["prompt"], custom_prompt)
+        conn.close()
+
+    def test_b_generate_without_prompt_uses_db_fallback(self):
+        bid, iid, pid = _ready_batch(self.client, "FALLBK2")
+        inst = self.client.get(f"/api/v1/video-instances/{iid}")
+        nodes = inst.json()["nodes"]
+        s01 = next(n for n in nodes if n["shot_key"] == "S01_main")
+        r = self.client.post(f"/api/v1/video-nodes/{s01['node_id']}/generate",
+            json={"model_adapter": "mock"})
+        self.assertEqual(r.status_code, 200)
+        result = r.json()
+        self.assertEqual(result["status"], "success")
+        self.assertIsNotNone(result.get("video_url"))
+
+    def test_c_prompt_override_does_not_pollute_db_prompt(self):
+        bid, iid, pid = _ready_batch(self.client, "NOPOLL")
+        inst = self.client.get(f"/api/v1/video-instances/{iid}")
+        nodes = inst.json()["nodes"]
+        s01 = next(n for n in nodes if n["shot_key"] == "S01_main")
+        original_prompt = s01.get("prompt", "")
+        custom = "临时覆盖提示词，不应写入数据库"
+        self.client.post(f"/api/v1/video-nodes/{s01['node_id']}/generate",
+            json={"prompt": custom, "model_adapter": "mock"})
+        inst2 = self.client.get(f"/api/v1/video-instances/{iid}")
+        nodes2 = inst2.json()["nodes"]
+        s01_after = next(n for n in nodes2 if n["shot_key"] == "S01_main")
+        self.assertEqual(s01_after.get("prompt", ""), original_prompt)

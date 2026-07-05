@@ -48,14 +48,31 @@ export function buildFinalPrompt(config: StoryboardPromptConfig): string {
   return base;
 }
 
-export function getDefaultStoryboardConfig(s: string): StoryboardPromptConfig {
-  const defaults: Record<string, StoryboardPromptConfig> = {
+export function getDefaultStoryboardConfig(s: string, productLine?: 'desk_calendar' | 'wall_calendar', motionShotVersion?: 'primary' | 'backup'): StoryboardPromptConfig {
+  const pl = productLine || 'desk_calendar';
+  const isWall = pl === 'wall_calendar';
+  const isBackup = motionShotVersion === 'backup';
+  const shared: Record<string, StoryboardPromptConfig> = {
     S01_main:    { shot_size: '中景', camera_move: '推进', lighting_mood: '清透高饱和', motion_intensity: '轻微', defocus_level: '轻度虚化', safety_margin: 8, is_prompt_customized: false, safety_suffix_enabled: true },
     S02_detail1: { shot_size: '特写', camera_move: '静止', lighting_mood: '清透高饱和', motion_intensity: '轻微', defocus_level: '轻度虚化', safety_margin: 8, is_prompt_customized: false, safety_suffix_enabled: true },
-    S03_detail2: { shot_size: '特写', camera_move: '静止', lighting_mood: '清透高饱和', motion_intensity: '轻微', defocus_level: '轻度虚化', safety_margin: 8, is_prompt_customized: false, safety_suffix_enabled: true },
-    S04_motion:  { shot_size: '中景', camera_move: '轻微平移', lighting_mood: '清透高饱和', motion_intensity: '轻微', defocus_level: '轻度虚化', safety_margin: 8, is_prompt_customized: false, safety_suffix_enabled: true },
-    S05_scene:   { shot_size: '远景', camera_move: '拉远', lighting_mood: '清透高饱和', motion_intensity: '中等', defocus_level: '无虚化', safety_margin: 8, is_prompt_customized: false, safety_suffix_enabled: true },
     S06_brand:   { shot_size: '中景', camera_move: '拉远', lighting_mood: '清透高饱和', motion_intensity: '轻微', defocus_level: '轻度虚化', safety_margin: 8, is_prompt_customized: false, safety_suffix_enabled: true },
   };
+  const desk_s04_primary: StoryboardPromptConfig = { shot_size: '中景', camera_move: '轻微平移', lighting_mood: '清透高饱和', motion_intensity: '轻微', defocus_level: '轻度虚化', safety_margin: 8, is_prompt_customized: false, safety_suffix_enabled: true };
+  const desk_s04_backup:  StoryboardPromptConfig = { shot_size: '中景', camera_move: '推进', lighting_mood: '清透高饱和', motion_intensity: '轻微', defocus_level: '轻度虚化', safety_margin: 8, is_prompt_customized: false, safety_suffix_enabled: true };
+  const wall_s04_primary: StoryboardPromptConfig = { shot_size: '中景', camera_move: '轻微平移', lighting_mood: '清透高饱和', motion_intensity: '轻微', defocus_level: '轻度虚化', safety_margin: 8, is_prompt_customized: false, safety_suffix_enabled: true };
+  const wall_s04_backup:  StoryboardPromptConfig = { shot_size: '中景', camera_move: '推进', lighting_mood: '清透高饱和', motion_intensity: '轻微', defocus_level: '轻度虚化', safety_margin: 8, is_prompt_customized: false, safety_suffix_enabled: true };
+  const desk_cfgs: Record<string, StoryboardPromptConfig> = {
+    ...shared,
+    S03_detail2: { shot_size: '特写', camera_move: '静止', lighting_mood: '清透高饱和', motion_intensity: '轻微', defocus_level: '轻度虚化', safety_margin: 8, is_prompt_customized: false, safety_suffix_enabled: true },
+    S04_motion:  isBackup ? desk_s04_backup : desk_s04_primary,
+    S05_scene:   { shot_size: '远景', camera_move: '拉远', lighting_mood: '清透高饱和', motion_intensity: '中等', defocus_level: '无虚化', safety_margin: 8, is_prompt_customized: false, safety_suffix_enabled: true },
+  };
+  const wall_cfgs: Record<string, StoryboardPromptConfig> = {
+    ...shared,
+    S03_detail2: { shot_size: '特写', camera_move: '静止', lighting_mood: '清透高饱和', motion_intensity: '轻微', defocus_level: '轻度虚化', safety_margin: 8, is_prompt_customized: false, safety_suffix_enabled: true },
+    S04_motion:  isBackup ? wall_s04_backup : wall_s04_primary,
+    S05_scene:   { shot_size: '远景', camera_move: '拉远', lighting_mood: '清透高饱和', motion_intensity: '中等', defocus_level: '无虚化', safety_margin: 8, is_prompt_customized: false, safety_suffix_enabled: true },
+  };
+  const defaults = isWall ? wall_cfgs : desk_cfgs;
   return defaults[s] || defaults['S01_main'];
 }

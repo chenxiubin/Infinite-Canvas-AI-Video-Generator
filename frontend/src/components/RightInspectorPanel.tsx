@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import * as api from '../api/mvp3';
-import { Eye, Check, X, RotateCcw, AlertCircle, Activity, Cpu, Layers, FileVideo, Settings, Edit3 } from 'lucide-react';
+import { Eye, Check, X, RotateCcw, AlertCircle, Activity, Cpu, Layers, FileVideo, Settings, Edit3, Play, Loader2 } from 'lucide-react';
 import { type StoryboardPromptConfig, getDefaultStoryboardConfig, buildFinalPrompt, buildStandardShotPrompt, SHOT_SIZE_OPTIONS, CAMERA_MOVE_OPTIONS, LIGHTING_MOOD_OPTIONS, MOTION_INTENSITY_OPTIONS, DEFOCUS_LEVEL_OPTIONS, SAFETY_SUFFIX } from '../lib/storyboardPrompt';
 
 interface NodeDetail {
@@ -26,7 +26,10 @@ interface Props {
   selectedBinding?: ShotFrameBinding;
   getBoundAsset?: (assetId?: string) => WorkbenchAsset | undefined;
   onBindShotFrame?: (shotKey: string, frameType: 'startFrame' | 'endFrame' | 'reference', assetId: string | null) => void;
+  onGenerateSingleShot?: (nodeId: string, shotKey: string) => void;
+  generatingShotKeys?: string[];
   storyboardConfigs?: Record<string, StoryboardPromptConfig>;
+  productLine?: 'desk_calendar' | 'wall_calendar';
   onUpdateStoryboardConfig?: (shotKey: string, config: StoryboardPromptConfig) => void;
   motionShotVersion?: 'primary' | 'backup';
   onSetMotionShotVersion?: (v: 'primary' | 'backup') => void;
@@ -46,7 +49,7 @@ const statusBadgeCls: Record<string, string> = {
   failed: 'text-red-400 bg-red-900/30 border-red-500/30',
 };
 
-export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefresh, instance, modelAdapter, batchStatus, nodeCount, assets, selectedBinding, getBoundAsset, onBindShotFrame, storyboardConfigs, onUpdateStoryboardConfig, motionShotVersion, onSetMotionShotVersion }) => {
+export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefresh, instance, modelAdapter, batchStatus, nodeCount, assets, selectedBinding, getBoundAsset, onBindShotFrame, onGenerateSingleShot, generatingShotKeys, storyboardConfigs, onUpdateStoryboardConfig, motionShotVersion, onSetMotionShotVersion, productLine }) => {
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -139,7 +142,7 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
             {/* 分镜属性面板 */}
             {onUpdateStoryboardConfig && node.shot_key && (() => {
               const sk = node.shot_key;
-              const config = (storyboardConfigs || {})[sk] || getDefaultStoryboardConfig(sk);
+              const config = (storyboardConfigs || {})[sk] || getDefaultStoryboardConfig(sk, productLine, motionShotVersion);
               const update = (c: StoryboardPromptConfig) => onUpdateStoryboardConfig(sk, c);
               const finalPrompt = buildFinalPrompt(config);
               const safetyMoves = ['推进', '拉远'];
@@ -191,7 +194,7 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
                         placeholder="自定义提示词..." />
                       <div className="flex items-center gap-2">
                         <button data-testid={`storyboard-reset-prompt-${sk}`}
-                          onClick={() => update({ ...getDefaultStoryboardConfig(sk), custom_prompt_override: undefined, is_prompt_customized: false })}
+                          onClick={() => update({ ...getDefaultStoryboardConfig(sk, productLine, motionShotVersion), custom_prompt_override: undefined, is_prompt_customized: false })}
                           className="text-[9px] text-purple-400 hover:text-purple-300">重置为标准模板</button>
                         <label className="flex items-center gap-1 text-[9px] text-gray-500 ml-auto">
                           <input type="checkbox" data-testid={`storyboard-safety-suffix-${sk}`} checked={config.safety_suffix_enabled}
@@ -310,8 +313,9 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
 
             {node.video_url && (
               <div className="bg-[#0a0f1a] rounded-lg p-2.5 border border-white/5">
-                <div className="text-gray-600 text-[10px] mb-1">视频地址</div>
-                <div data-testid="canvas-detail-video-url" className="text-green-400 break-all text-[10px] leading-relaxed">{node.video_url}</div>
+                <div className="text-gray-600 text-[10px] mb-1">视频预览</div>
+                <video data-testid="single-shot-video-preview" src={node.video_url} controls preload="metadata" className="w-full rounded border border-white/5" style={{ maxHeight: 160 }} />
+                <div data-testid="canvas-detail-video-url" className="text-green-400 break-all text-[10px] leading-relaxed mt-1">{node.video_url}</div>
               </div>
             )}
             {node.prompt && (
@@ -357,7 +361,28 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
               </>
             )}
             {node.status !== 'success' && node.status !== 'failed' && (
-              <div className="text-gray-600 text-[10px] text-center py-2">节点完成后可进行操作</div>
+              <div className="space-y-1.5">
+                {node.status === 'pending' && onGenerateSingleShot && (
+                  <>
+                    {!selectedBinding?.startFrameAssetId ? (
+                      <div data-testid="single-shot-generate-disabled-reason" className="text-amber-400 text-[9px] text-center">请先绑定首帧图</div>
+                    ) : generatingShotKeys?.includes(node.shot_key) ? (
+                      <div data-testid="single-shot-generating-status" className="flex items-center justify-center gap-1.5 text-blue-400 text-[10px] py-1">
+                        <Loader2 className="w-3 h-3 animate-spin" /> 生成中...
+                      </div>
+                    ) : (
+                      <button data-testid="single-shot-generate-button"
+                        onClick={() => onGenerateSingleShot(node.node_id, node.shot_key)}
+                        className="flex items-center justify-center gap-1.5 bg-purple-900/40 hover:bg-purple-900/60 text-purple-300 text-xs px-3 py-2 rounded-lg w-full transition-colors border border-purple-700/20 font-medium">
+                        <Play className="w-3 h-3" /> 生成此分镜
+                      </button>
+                    )}
+                  </>
+                )}
+                {node.status !== 'pending' && (
+                  <div className="text-gray-600 text-[10px] text-center py-2">节点完成后可进行操作</div>
+                )}
+              </div>
             )}
           </div>
         </div>

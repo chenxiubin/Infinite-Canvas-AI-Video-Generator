@@ -99,8 +99,8 @@ export const getInstanceReviews = (instanceId: string) =>
 export const getVideoNode = (nodeId: string) =>
   request(`/api/v1/video-nodes/${nodeId}`);
 
-export const generateVideoNode = (nodeId: string) =>
-  request(`/api/v1/video-nodes/${nodeId}/generate`, { method: 'POST', body: JSON.stringify({}) });
+export const generateVideoNode = (nodeId: string, body?: { prompt?: string }) =>
+  request(`/api/v1/video-nodes/${nodeId}/generate`, { method: 'POST', body: JSON.stringify(body || {}) });
 
 export const retryVideoNode = (nodeId: string) =>
   request(`/api/v1/video-nodes/${nodeId}/retry`, { method: 'POST', body: JSON.stringify({}) });
