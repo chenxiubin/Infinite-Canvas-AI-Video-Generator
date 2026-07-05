@@ -13,6 +13,8 @@ interface Props {
   onSetModelAdapter: (k: string) => void; onSetViewMode: (m: 'form' | 'canvas') => void; onClearError: () => void;
   assets?: WorkbenchAsset[]; onUploadAssets?: (files: FileList) => void; onUpdateAssetRole?: (assetId: string, role: string) => void;
   onSelectShot?: (shotKey: string) => void; selectedShotKey?: string | null;
+  productLine?: 'desk_calendar' | 'wall_calendar'; onSetProductLine?: (pl: 'desk_calendar' | 'wall_calendar') => void;
+  motionShotVersion?: 'primary' | 'backup';
 }
 
 const SectionCard: React.FC<{ title: string; icon: React.ReactNode; children: React.ReactNode; testid?: string }> =
@@ -58,6 +60,46 @@ export const WorkflowSidebar: React.FC<Props> = (p) => (
           <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
           <span className="flex-1 break-all">{p.error}</span>
           <button onClick={p.onClearError} className="text-red-400 hover:text-red-300 flex-shrink-0"><X className="w-3 h-3" /></button>
+        </div>
+      )}
+
+      {/* 产品线选择器 */}
+      {p.onSetProductLine && (
+        <div data-testid="product-line-selector" className="bg-[#111827] border border-white/5 rounded-xl overflow-hidden">
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 bg-[#0d1117]">
+            <span className="text-gray-500"><Layers className="w-3 h-3" /></span>
+            <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">产品线</span>
+          </div>
+          <div className="p-2 flex gap-1">
+            <button data-testid="product-line-desk-calendar" onClick={() => p.onSetProductLine?.('desk_calendar')}
+              className={`flex-1 text-[10px] py-1.5 rounded-lg transition-colors ${(p.productLine || 'desk_calendar') === 'desk_calendar' ? 'bg-purple-600/40 text-purple-200 border border-purple-500/30' : 'text-gray-500 hover:bg-white/5'}`}>台历</button>
+            <button data-testid="product-line-wall-calendar" onClick={() => p.onSetProductLine?.('wall_calendar')}
+              className={`flex-1 text-[10px] py-1.5 rounded-lg transition-colors ${p.productLine === 'wall_calendar' ? 'bg-purple-600/40 text-purple-200 border border-purple-500/30' : 'text-gray-500 hover:bg-white/5'}`}>挂历</button>
+          </div>
+          <div data-testid="current-product-line-label" className="text-center text-[9px] text-gray-600 pb-1.5">
+            当前：{(p.productLine || 'desk_calendar') === 'desk_calendar' ? '台历' : '挂历'}
+          </div>
+          {/* 素材需求清单 */}
+          <div data-testid="material-requirements-panel" className="px-2 pb-2 space-y-0.5">
+            <div className="text-[9px] text-gray-500 mb-1">素材需求清单</div>
+            {([
+              { s: 'S01', l: '产品完整正面图' },
+              { s: 'S02', l: '材质/纸张质感图' },
+              { s: 'S03', l: (p.productLine || 'desk_calendar') === 'desk_calendar' ? '台历底座/翻页装订结构图' : '挂绳/装订孔结构图' },
+              { s: 'S04', l: (p.productLine || 'desk_calendar') === 'desk_calendar' ? '手部翻页定格图' : '悬挂展开定格图' },
+              { s: 'S05', l: (p.productLine || 'desk_calendar') === 'desk_calendar' ? '书桌/办公场景图' : '客厅墙面/玄关场景图' },
+              { s: 'S06', l: '产品整体收尾图' },
+            ]).map(m => (
+              <div key={m.s} data-testid={`material-requirement-${m.s}`} className="text-[8px] text-gray-600 flex items-center gap-1">
+                <span className="w-1 h-1 rounded-full bg-gray-700 flex-shrink-0" />{m.s} {m.l}
+              </div>
+            ))}
+            {p.motionShotVersion === 'backup' && (
+              <div data-testid="material-requirement-S04-backup" className="text-[8px] text-amber-500 flex items-center gap-1">
+                <span className="w-1 h-1 rounded-full bg-amber-500 flex-shrink-0" />S04 备用：{(p.productLine || 'desk_calendar') === 'desk_calendar' ? '台历与咖啡杯、钢笔等桌面参照物同框素材' : '挂历与门框、墙面参照物同框素材'}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

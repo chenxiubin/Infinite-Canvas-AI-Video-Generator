@@ -205,7 +205,10 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
                     </div>
                   )}
                   {config.is_prompt_customized && (
-                    <div className="text-[8px] text-amber-400 flex items-center gap-1"><Edit3 className="w-2.5 h-2.5" /> 已自定义提示词，常规字段已锁定</div>
+                    <div data-testid="custom-prompt-product-line-protection-warning" className="text-[8px] text-amber-400 space-y-0.5">
+                      <div className="flex items-center gap-1"><Edit3 className="w-2.5 h-2.5" /> 已自定义提示词，常规字段已锁定</div>
+                      <div>该分镜已自定义，切换产品线未自动覆盖提示词</div>
+                    </div>
                   )}
                 </div>
               );

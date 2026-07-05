@@ -30,6 +30,7 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
   const [connectingAssetId, setConnectingAssetId] = useState<string | null>(null);
   const [storyboardConfigs, setStoryboardConfigs] = useState<Record<string, StoryboardPromptConfig>>({});
   const [motionShotVersion, setMotionShotVersion] = useState<'primary' | 'backup'>('primary');
+	const [productLine, setProductLine] = useState<'desk_calendar' | 'wall_calendar'>('desk_calendar');
 
   const batchIdRef = useRef(''); const instanceRef = useRef<InstanceData | null>(null);
   useEffect(() => { batchIdRef.current = batchId; }, [batchId]);
@@ -172,6 +173,7 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
             onSetModelAdapter={setModelAdapter} onSetViewMode={setViewMode} onClearError={clearError}
             assets={assets} onUploadAssets={handleUploadAssets} onUpdateAssetRole={handleUpdateAssetRole}
             onSelectShot={(sk) => setSelectedNodeId(sk)} selectedShotKey={selectedNodeId}
+            productLine={productLine} onSetProductLine={setProductLine} motionShotVersion={motionShotVersion}
           />
         </div>
 
