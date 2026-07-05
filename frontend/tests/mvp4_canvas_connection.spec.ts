@@ -79,8 +79,7 @@ test.describe('MVP-4 Canvas Connection', () => {
     const assetCard = page.getByTestId('asset-library-panel').locator('[data-testid^="asset-card-"]').first();
     await assetCard.locator('select').selectOption('start_frame');
     await page.getByTestId('workbench-tab-canvas').click();
-    await expect(page.getByTestId('canvas-node-S01_main')).toBeVisible({ timeout: 8000 });
-    await page.getByTestId('canvas-node-S01_main').click();
+    await page.getByTestId('workflow-shot-S01_main').click();
     await expect(page.getByTestId('canvas-node-detail-panel')).toBeVisible({ timeout: 8000 });
     const bindSelect = page.getByTestId('bind-start-frame-select');
     await expect(bindSelect).toBeVisible({ timeout: 3000 });
@@ -145,8 +144,7 @@ test.describe('MVP-4 Canvas Connection', () => {
     await assetCard.locator('select').selectOption('start_frame');
     // Bind via Inspector
     await page.getByTestId('workbench-tab-canvas').click();
-    await expect(page.getByTestId('canvas-node-S01_main')).toBeVisible({ timeout: 8000 });
-    await page.getByTestId('canvas-node-S01_main').click();
+    await page.getByTestId('workflow-shot-S01_main').click();
     const bindSelect = page.getByTestId('bind-start-frame-select');
     await expect(bindSelect).toBeVisible({ timeout: 3000 });
     const options = bindSelect.locator('option'); const count = await options.count();
