@@ -3,7 +3,6 @@ import { test, expect } from '@playwright/test';
 test.describe('MVP-4 Product Line Profile', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
-    await page.waitForTimeout(2000);
     const wbBtn = page.getByRole('button', { name: '生产工作台' });
     if (await wbBtn.isVisible({ timeout: 5000 }).catch(() => false)) await wbBtn.click();
     await expect(page.getByTestId('mvp3-workbench')).toBeVisible({ timeout: 10000 });
