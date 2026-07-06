@@ -28,6 +28,7 @@ interface Props {
   onBindShotFrame?: (shotKey: string, frameType: 'startFrame' | 'endFrame' | 'reference', assetId: string | null) => void;
   onGenerateSingleShot?: (nodeId: string, shotKey: string) => void;
   onRegenerateShot?: (nodeId: string, shotKey: string) => void;
+  onReviewAction?: (shotKey: string, action: string, reason?: string) => void;
   generatingShotKeys?: string[];
   storyboardConfigs?: Record<string, StoryboardPromptConfig>;
   productLine?: 'desk_calendar' | 'wall_calendar';
@@ -50,14 +51,14 @@ const statusBadgeCls: Record<string, string> = {
   failed: 'text-red-400 bg-red-900/30 border-red-500/30',
 };
 
-export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefresh, instance, modelAdapter, batchStatus, nodeCount, assets, selectedBinding, getBoundAsset, onBindShotFrame, onGenerateSingleShot, onRegenerateShot, generatingShotKeys, storyboardConfigs, onUpdateStoryboardConfig, motionShotVersion, onSetMotionShotVersion, productLine }) => {
+export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefresh, instance, modelAdapter, batchStatus, nodeCount, assets, selectedBinding, getBoundAsset, onBindShotFrame, onGenerateSingleShot, onRegenerateShot, onReviewAction, generatingShotKeys, storyboardConfigs, onUpdateStoryboardConfig, motionShotVersion, onSetMotionShotVersion, productLine }) => {
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [inspectorMode, setInspectorMode] = useState<'basic' | 'advanced'>('basic');
 
-  const doAction = async (fn: () => Promise<any>) => {
-    try { setError(''); setLoading(true); await fn(); await onRefresh(); } catch (e: any) { setError(e?.message || String(e)); } finally { setLoading(false); }
+  const doAction = async (fn: () => Promise<any>, after?: () => void) => {
+    try { setError(''); setLoading(true); await fn(); after?.(); await onRefresh(); } catch (e: any) { setError(e?.message || String(e)); } finally { setLoading(false); }
   };
 
   const rv = node?.review_status || '-';
@@ -347,7 +348,7 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
             {node.status === 'success' && (
               <>
                 <button data-testid="canvas-detail-approve-button"
-                  onClick={() => doAction(() => api.reviewVideoNode(node.node_id, 'approve'))}
+                  onClick={() => doAction(() => api.reviewVideoNode(node.node_id, 'approve'), () => onReviewAction?.(node.shot_key, 'approve'))}
                   className="flex items-center justify-center gap-1.5 bg-green-900/40 hover:bg-green-900/60 text-green-300 text-xs px-3 py-2 rounded-lg w-full transition-colors border border-green-700/20 font-medium">
                   <Check className="w-3 h-3" /> 通过
                 </button>
@@ -357,7 +358,7 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
                     value={reason} onChange={e => setReason(e.target.value)}
                     className="bg-[#0a0f1a] border border-white/10 rounded-lg px-3 py-2 text-gray-200 text-xs w-full placeholder:text-gray-600 focus:outline-none focus:border-red-500/50 transition-colors" />
                   <button data-testid="canvas-detail-reject-button"
-                    onClick={() => { if (!reason.trim()) { setError('驳回必须填写原因'); return; } doAction(() => api.reviewVideoNode(node.node_id, 'reject', reason)); }}
+                    onClick={() => { if (!reason.trim()) { setError('驳回必须填写原因'); return; } doAction(() => api.reviewVideoNode(node.node_id, 'reject', reason), () => onReviewAction?.(node.shot_key, 'reject', reason)); }}
                     className="flex items-center justify-center gap-1.5 bg-red-900/40 hover:bg-red-900/60 text-red-300 text-xs px-3 py-2 rounded-lg w-full transition-colors border border-red-700/20 font-medium">
                     <X className="w-3 h-3" /> 驳回
                   </button>

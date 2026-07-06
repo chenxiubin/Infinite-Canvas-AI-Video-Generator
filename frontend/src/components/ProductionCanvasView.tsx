@@ -30,6 +30,7 @@ interface Props {
   connectingAssetId?: string | null;
   onStartConnecting?: (assetId: string) => void;
   onCancelConnecting?: () => void;
+  onRegenerateShot?: (nodeId: string, shotKey: string) => void;
 }
 
 const DEFAULT_SHOTS = [
@@ -138,7 +139,7 @@ const CanvasToolbar: React.FC<{ instance: any; noData: boolean; connectingAssetI
   </div>);
 };
 
-export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefresh, onSelectNode, assets, shotBindings, onConnectBinding, onDeleteBinding, connectingAssetId, onStartConnecting, onCancelConnecting }) => {
+export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefresh, onSelectNode, assets, shotBindings, onConnectBinding, onDeleteBinding, connectingAssetId, onStartConnecting, onCancelConnecting, onRegenerateShot }) => {
   const noData = !instance || nodes.length === 0;
 
   // Build shot nodes and base edges
@@ -175,12 +176,24 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
   }, [shotBindings, handleEdgeDelete]);
 
   // Derive video preview nodes from shot nodes that have video_url
-  const { nodes: videoPreviewNodes, edges: videoPreviewEdges } = useMemo(() => {
+  const videoPreviewResult = useMemo(() => {
     const shots = (nodes.length > 0 ? nodes : DEFAULT_SHOTS.map(s => ({ ...s, status: 'pending', review_status: '-', video_url: undefined })));
     const positions: Record<string, { x: number; y: number }> = {};
     shots.forEach((s, i) => { positions[s.shot_key] = { x: i * 200, y: 60 }; });
-    return deriveVideoPreviewNodes(shots as any, positions);
-  }, [nodes]);
+    const raw = deriveVideoPreviewNodes(shots as any, positions);
+    return {
+      nodes: raw.nodes.map(n => ({
+        ...n,
+        data: { ...n.data, onRegenerate: (d: any) => {
+          const node = nodes.find(nn => nn.shot_key === d.shot_key);
+          if (node?.node_id) onRegenerateShot?.(node.node_id, d.shot_key);
+        }},
+      })),
+      edges: raw.edges,
+    };
+  }, [nodes, onRegenerateShot]);
+  const videoPreviewNodes = videoPreviewResult.nodes;
+  const videoPreviewEdges = videoPreviewResult.edges;
 
   const allNodes = useMemo(() => [...shotNodes, ...assetNodes, ...videoPreviewNodes], [shotNodes, assetNodes, videoPreviewNodes]);
   const allEdges = useMemo(() => [...baseEdges, ...bindingEdges, ...videoPreviewEdges], [baseEdges, bindingEdges, videoPreviewEdges]);

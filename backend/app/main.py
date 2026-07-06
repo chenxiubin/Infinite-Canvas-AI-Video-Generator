@@ -2444,6 +2444,7 @@ def get_video_instance(instance_id: str, db: sqlite3.Connection = Depends(get_db
             "job_id": r["job_id"],
             "retry_count": r["retry_count"],
             "review_status": r["review_status"],
+            "review_reason": r["review_reason"],
             "error_message": r["error_message"],
         }
         for r in cursor.fetchall()

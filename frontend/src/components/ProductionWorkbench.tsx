@@ -151,6 +151,14 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
     } catch (e: any) { setError(e?.message || '生成失败'); }
     finally { setGeneratingShotKeys(prev => prev.filter(k => k !== shotKey)); }
   };
+  const handleReviewAction = (shotKey: string, action: string, reason?: string) => {
+    if (action === 'approve') {
+      setNodes(prev => prev.map(n => n.shot_key === shotKey ? { ...n, review_status: 'approved', review_reason: '' } : n));
+    } else if (action === 'reject') {
+      setNodes(prev => prev.map(n => n.shot_key === shotKey ? { ...n, review_status: 'rejected', review_reason: reason || '' } : n));
+    }
+  };
+
   const handleRegenerateShot = async (nodeId: string, shotKey: string) => {
     if (!nodeId) return;
     setGeneratingShotKeys(prev => [...prev, shotKey]);
@@ -159,7 +167,7 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
       const prompt = buildFinalPrompt(config);
       // Force regenerate for rejected/failed nodes
       const result = await api.generateVideoNode(nodeId, { prompt, force: true });
-      setNodes(prev => prev.map(n => n.shot_key === shotKey ? { ...n, status: result.status, video_url: result.video_url, cover_url: result.cover_url, review_status: result.status === 'success' ? 'pending' : n.review_status } : n));
+      setNodes(prev => prev.map(n => n.shot_key === shotKey ? { ...n, status: result.status, video_url: result.video_url, cover_url: result.cover_url, review_status: result.status === 'success' ? 'pending' : n.review_status, review_reason: '' } : n));
     } catch (e: any) { setError(e?.message || '重新生成失败'); }
     finally { setGeneratingShotKeys(prev => prev.filter(k => k !== shotKey)); }
   };
@@ -209,6 +217,7 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
             assets={assets} shotBindings={shotBindings}
             onConnectBinding={handleBindShotFrame}
             onDeleteBinding={(shotKey, frameType) => handleBindShotFrame(shotKey, frameType as any, null)}
+            onRegenerateShot={handleRegenerateShot}
             connectingAssetId={connectingAssetId}
             onStartConnecting={setConnectingAssetId}
             onCancelConnecting={() => setConnectingAssetId(null)} />
@@ -222,7 +231,8 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
             storyboardConfigs={storyboardConfigs} onUpdateStoryboardConfig={(sk, c) => setStoryboardConfigs(prev => ({...prev, [sk]: c}))}
             motionShotVersion={motionShotVersion} onSetMotionShotVersion={setMotionShotVersion}
             onGenerateSingleShot={handleGenerateSingleShot} onRegenerateShot={handleRegenerateShot}
-            generatingShotKeys={generatingShotKeys} productLine={productLine} />
+            generatingShotKeys={generatingShotKeys} productLine={productLine}
+            onReviewAction={handleReviewAction} />
         </div>
       </div>
     </div>

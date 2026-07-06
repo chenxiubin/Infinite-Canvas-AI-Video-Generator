@@ -164,4 +164,174 @@ test.describe('MVP-4 Video Preview Node', () => {
     await expect(page.getByTestId('video-preview-node-review-S01_main')).toBeVisible({ timeout: 5000 });
     await expect(page.getByTestId('video-preview-node-review-S01_main')).toContainText('已通过', { timeout: 5000 });
   });
+
+  // ============================================================
+  // New tests: M4-VideoPreview-04 / 05 / 06
+  // ============================================================
+
+  test('M4-VideoPreview-04: 整卡片点击联动 Inspector', async ({ page }) => {
+    test.setTimeout(90000);
+
+    // Setup: create batch, bind start frame, generate S01
+    await page.getByTestId('create-demo-product-button').click();
+    await expect(page.getByTestId('checklist-ready')).toBeVisible({ timeout: 20000 });
+    await page.getByTestId('template-desk_calendar').first().click();
+    await page.getByTestId('create-video-batch-button').click();
+    await expect(page.getByTestId('batch-id')).toBeVisible({ timeout: 10000 });
+
+    const fileInput = page.getByTestId('asset-upload-input');
+    await fileInput.setInputFiles({
+      name: 'vp04.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64'),
+    });
+    await expect(page.getByTestId('asset-library-panel')).toBeVisible({ timeout: 5000 });
+    const assetCard = page.getByTestId('asset-library-panel').locator('[data-testid^="asset-card-"]').first();
+    await assetCard.locator('select').selectOption('start_frame');
+
+    await page.getByTestId('workflow-shot-S01_main').click();
+    await expect(page.getByTestId('canvas-node-detail-panel')).toBeVisible({ timeout: 8000 });
+
+    const bindSelect = page.getByTestId('bind-start-frame-select');
+    await expect(bindSelect).toBeVisible({ timeout: 3000 });
+    const options = bindSelect.locator('option');
+    const count = await options.count();
+    if (count > 1) {
+      const val = await options.nth(1).getAttribute('value');
+      if (val) await bindSelect.selectOption(val);
+    }
+    await expect(page.getByTestId('start-frame-preview')).toBeVisible({ timeout: 5000 });
+
+    await expect(page.getByTestId('single-shot-generate-button')).toBeVisible({ timeout: 3000 });
+    await page.getByTestId('single-shot-generate-button').click();
+
+    // Wait for video preview node to appear (proves generation succeeded)
+    await expect(page.getByTestId('video-preview-node-S01_main')).toBeAttached({ timeout: 30000 });
+
+    // Click the whole card (NOT the open-inspector button inside it).
+    // The card's handleCardClick calls onSelect, which opens the inspector.
+    await page.getByTestId('video-preview-node-S01_main').click();
+
+    // Assert inspector shows S01_main details and video preview
+    await expect(page.getByTestId('canvas-detail-shot-key')).toContainText('S01_main', { timeout: 5000 });
+    await expect(page.getByTestId('single-shot-video-preview')).toBeAttached({ timeout: 5000 });
+  });
+
+  test('M4-VideoPreview-05: rejected状态显示驳回原因+regenerate', async ({ page }) => {
+    test.setTimeout(90000);
+
+    // Setup: create batch, bind start frame, generate S01
+    await page.getByTestId('create-demo-product-button').click();
+    await expect(page.getByTestId('checklist-ready')).toBeVisible({ timeout: 20000 });
+    await page.getByTestId('template-desk_calendar').first().click();
+    await page.getByTestId('create-video-batch-button').click();
+    await expect(page.getByTestId('batch-id')).toBeVisible({ timeout: 10000 });
+
+    const fileInput = page.getByTestId('asset-upload-input');
+    await fileInput.setInputFiles({
+      name: 'vp05.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64'),
+    });
+    await expect(page.getByTestId('asset-library-panel')).toBeVisible({ timeout: 5000 });
+    const assetCard = page.getByTestId('asset-library-panel').locator('[data-testid^="asset-card-"]').first();
+    await assetCard.locator('select').selectOption('start_frame');
+
+    await page.getByTestId('workflow-shot-S01_main').click();
+    await expect(page.getByTestId('canvas-node-detail-panel')).toBeVisible({ timeout: 8000 });
+
+    const bindSelect = page.getByTestId('bind-start-frame-select');
+    await expect(bindSelect).toBeVisible({ timeout: 3000 });
+    const options = bindSelect.locator('option');
+    const count = await options.count();
+    if (count > 1) {
+      const val = await options.nth(1).getAttribute('value');
+      if (val) await bindSelect.selectOption(val);
+    }
+    await expect(page.getByTestId('start-frame-preview')).toBeVisible({ timeout: 5000 });
+
+    await expect(page.getByTestId('single-shot-generate-button')).toBeVisible({ timeout: 3000 });
+    await page.getByTestId('single-shot-generate-button').click();
+
+    // Wait for video preview node to appear (generation succeeded)
+    await expect(page.getByTestId('video-preview-node-S01_main')).toBeAttached({ timeout: 30000 });
+
+    // Explicitly re-select S01 to ensure Inspector has latest state
+    await page.getByTestId('workflow-shot-S01_main').click();
+    await expect(page.getByTestId('canvas-node-detail-panel')).toBeVisible({ timeout: 8000 });
+    // Reject S01 via Inspector: fill reason, click reject
+    await page.getByTestId('canvas-detail-reject-reason').fill('画面动作不自然，需要重新生成');
+    await page.getByTestId('canvas-detail-reject-button').click();
+    // Wait for Inspector to show reject completed
+    await expect(page.getByTestId('canvas-detail-review-status')).toContainText('rejected', { timeout: 8000 });
+
+    // Wait for video preview node review badge to update (refreshAll completes)
+    await expect(page.getByTestId('video-preview-node-review-S01_main')).toContainText('已驳回', { timeout: 20000 });
+    // Assert rejected reason and regenerate button
+    await expect(page.getByTestId('video-preview-node-rejected-reason-S01_main')).toBeAttached({ timeout: 15000 });
+    await expect(page.getByTestId('video-preview-node-regenerate-S01_main')).toBeAttached({ timeout: 10000 });
+  });
+
+  test('M4-VideoPreview-06: approved显示merge-ready', async ({ page }) => {
+    test.setTimeout(90000);
+
+    // Setup: create batch, bind start frame, generate S01
+    await page.getByTestId('create-demo-product-button').click();
+    await expect(page.getByTestId('checklist-ready')).toBeVisible({ timeout: 20000 });
+    await page.getByTestId('template-desk_calendar').first().click();
+    await page.getByTestId('create-video-batch-button').click();
+    await expect(page.getByTestId('batch-id')).toBeVisible({ timeout: 10000 });
+
+    const fileInput = page.getByTestId('asset-upload-input');
+    await fileInput.setInputFiles({
+      name: 'vp06.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64'),
+    });
+    await expect(page.getByTestId('asset-library-panel')).toBeVisible({ timeout: 5000 });
+    const assetCard = page.getByTestId('asset-library-panel').locator('[data-testid^="asset-card-"]').first();
+    await assetCard.locator('select').selectOption('start_frame');
+
+    await page.getByTestId('workflow-shot-S01_main').click();
+    await expect(page.getByTestId('canvas-node-detail-panel')).toBeVisible({ timeout: 8000 });
+
+    const bindSelect = page.getByTestId('bind-start-frame-select');
+    await expect(bindSelect).toBeVisible({ timeout: 3000 });
+    const options = bindSelect.locator('option');
+    const count = await options.count();
+    if (count > 1) {
+      const val = await options.nth(1).getAttribute('value');
+      if (val) await bindSelect.selectOption(val);
+    }
+    await expect(page.getByTestId('start-frame-preview')).toBeVisible({ timeout: 5000 });
+
+    await expect(page.getByTestId('single-shot-generate-button')).toBeVisible({ timeout: 3000 });
+    await page.getByTestId('single-shot-generate-button').click();
+
+    // Wait for video preview node, then poll batch completion
+    await expect(page.getByTestId('video-preview-node-S01_main')).toBeAttached({ timeout: 30000 });
+    await expect(page.getByTestId('video-preview-node-status-S01_main')).toBeAttached({ timeout: 8000 });
+
+    const batchId = (await page.getByTestId('batch-id').textContent() || '').replace('batch_id: ', '').trim();
+    await page.evaluate(async (bid) => {
+      for (let i = 0; i < 30; i++) {
+        const r = await fetch(`/api/v1/video-batches/${bid}`);
+        if ((await r.json()).status === 'completed') return true;
+        await new Promise(res => setTimeout(res, 1000));
+      }
+      return false;
+    }, batchId);
+
+    // Open inspector via the open-inspector button, then approve
+    await page.getByTestId('video-preview-node-open-inspector-S01_main').click();
+    await expect(page.getByTestId('canvas-detail-shot-key')).toContainText('S01_main', { timeout: 5000 });
+
+    await expect(page.getByTestId('canvas-detail-approve-button')).toBeVisible({ timeout: 5000 });
+    await page.getByTestId('canvas-detail-approve-button').click();
+
+    // Assert merge-ready label and approved review status
+    await expect(page.getByTestId('video-preview-node-merge-ready-S01_main')).toBeAttached({ timeout: 8000 });
+    await expect(page.getByTestId('video-preview-node-review-S01_main')).toBeVisible({ timeout: 5000 });
+    await expect(page.getByTestId('video-preview-node-review-S01_main')).toContainText('已通过', { timeout: 5000 });
+  });
 });

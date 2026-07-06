@@ -55,6 +55,7 @@ export function deriveVideoPreviewNodes(
         cover_url: shot.cover_url,
         status: shot.status,
         review_status: shot.review_status,
+        reject_reason: (shot as any).review_reason || (shot as any).reject_reason,
       } satisfies VideoPreviewNodeData,
     });
 

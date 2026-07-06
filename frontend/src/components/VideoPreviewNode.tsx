@@ -9,6 +9,8 @@ interface VideoPreviewNodeData {
   status: string;
   review_status?: string;
   onSelect?: (item: any) => void;
+  onRegenerate?: (item: any) => void;
+  reject_reason?: string;
 }
 
 interface VideoPreviewNodeProps {
@@ -17,7 +19,7 @@ interface VideoPreviewNodeProps {
 }
 
 export const VideoPreviewNode: React.FC<VideoPreviewNodeProps> = ({ id, data }) => {
-  const { shot_key, shot_name, cover_url, status, review_status, onSelect } = data;
+  const { shot_key, shot_name, cover_url, status, review_status, onSelect, onRegenerate, reject_reason } = data;
 
   const getReviewBadge = () => {
     if (review_status === 'approved') {
@@ -31,15 +33,34 @@ export const VideoPreviewNode: React.FC<VideoPreviewNodeProps> = ({ id, data }) 
   };
 
   const getReviewLabel = () => {
-    if (review_status === 'approved') return '已通过';
-    if (review_status === 'rejected') return '已拒绝';
+    if (review_status === 'approved') return '已通过，可合成';
+    if (review_status === 'rejected') return '已驳回';
     return '待审核';
   };
+
+  const handleCardClick = () => {
+    onSelect?.(data);
+  };
+
+  const handleOpenInspector = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onSelect?.(data);
+  };
+
+  const handleRegenerate = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onRegenerate?.(data);
+  };
+
+  const showRegenerate = status === 'failed' || review_status === 'rejected';
 
   return (
     <div
       data-testid={`video-preview-node-${shot_key}`}
-      className="bg-[#111827] border border-white/10 rounded-xl p-3 w-38"
+      onClick={handleCardClick}
+      role="button"
+      tabIndex={0}
+      className="bg-[#111827] border border-white/10 rounded-xl p-3 w-40 cursor-pointer"
     >
       {/* Shot name */}
       <div
@@ -88,13 +109,42 @@ export const VideoPreviewNode: React.FC<VideoPreviewNodeProps> = ({ id, data }) 
         </span>
       </div>
 
+      {/* Rejected reason */}
+      {review_status === 'rejected' && reject_reason && (
+        <div
+          data-testid={`video-preview-node-rejected-reason-${shot_key}`}
+          className="text-[9px] text-red-400 truncate mb-2"
+          title={reject_reason}
+        >
+          {reject_reason}
+        </div>
+      )}
+
+      {/* Merge ready label */}
+      {review_status === 'approved' && (
+        <div
+          data-testid={`video-preview-node-merge-ready-${shot_key}`}
+          className="text-[9px] text-green-400 mb-2"
+        >
+          已通过，可合成
+        </div>
+      )}
+
+      {/* Regenerate button (only for rejected or failed) */}
+      {showRegenerate && (
+        <button
+          data-testid={`video-preview-node-regenerate-${shot_key}`}
+          onClick={handleRegenerate}
+          className="w-full text-[9px] text-orange-300 bg-orange-900/20 hover:bg-orange-900/40 rounded py-1 transition-colors mb-1.5"
+        >
+          重新生成
+        </button>
+      )}
+
       {/* Open in inspector button */}
       <button
         data-testid={`video-preview-node-open-inspector-${shot_key}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          onSelect?.(data);
-        }}
+        onClick={handleOpenInspector}
         className="w-full text-[8px] text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 rounded py-1 transition-colors"
       >
         在右侧查看
