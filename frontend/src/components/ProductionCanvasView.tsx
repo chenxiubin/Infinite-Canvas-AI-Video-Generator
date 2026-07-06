@@ -6,6 +6,8 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Package } from 'lucide-react';
+import { VideoPreviewNode } from './VideoPreviewNode';
+import { deriveVideoPreviewNodes } from '../lib/videoPreviewNodes';
 
 interface NodeItem {
   node_id: string; shot_key: string; shot_name: string; shot_order: number;
@@ -117,7 +119,7 @@ const MaterialEdge: React.FC<{ id: string; sourceX: number; sourceY: number; tar
   };
 
 const edgeTypes: EdgeTypes = { materialEdge: MaterialEdge };
-const shotNodeTypes: NodeTypes = { workbenchShot: WorkbenchShotNode, workbenchAsset: WorkbenchAssetNode };
+const shotNodeTypes: NodeTypes = { workbenchShot: WorkbenchShotNode, workbenchAsset: WorkbenchAssetNode, workbenchVideoPreview: VideoPreviewNode };
 
 // ==== Toolbar inside ReactFlow ====
 const CanvasToolbar: React.FC<{ instance: any; noData: boolean; connectingAssetId?: string | null; onCancelConnecting?: () => void }> = ({ instance, noData, connectingAssetId, onCancelConnecting }) => {
@@ -172,8 +174,16 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
     return es;
   }, [shotBindings, handleEdgeDelete]);
 
-  const allNodes = useMemo(() => [...shotNodes, ...assetNodes], [shotNodes, assetNodes]);
-  const allEdges = useMemo(() => [...baseEdges, ...bindingEdges], [baseEdges, bindingEdges]);
+  // Derive video preview nodes from shot nodes that have video_url
+  const { nodes: videoPreviewNodes, edges: videoPreviewEdges } = useMemo(() => {
+    const shots = (nodes.length > 0 ? nodes : DEFAULT_SHOTS.map(s => ({ ...s, status: 'pending', review_status: '-', video_url: undefined })));
+    const positions: Record<string, { x: number; y: number }> = {};
+    shots.forEach((s, i) => { positions[s.shot_key] = { x: i * 200, y: 60 }; });
+    return deriveVideoPreviewNodes(shots as any, positions);
+  }, [nodes]);
+
+  const allNodes = useMemo(() => [...shotNodes, ...assetNodes, ...videoPreviewNodes], [shotNodes, assetNodes, videoPreviewNodes]);
+  const allEdges = useMemo(() => [...baseEdges, ...bindingEdges, ...videoPreviewEdges], [baseEdges, bindingEdges, videoPreviewEdges]);
 
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState(allNodes);
   const [rfEdges, setRfEdges, onEdgesChangeLocal] = useEdgesState(allEdges);
