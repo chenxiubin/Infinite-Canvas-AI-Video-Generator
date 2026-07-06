@@ -368,7 +368,7 @@ class TestApprovedMerge(unittest.TestCase):
         detail_dict = body.get("detail", {})
         self.assertIn("approved", detail_dict.get("message", ""))
         blocked = detail_dict.get("blocked_shot_keys", [])
-        expected_key = f"{iid}:{first_node_shot}"
+        expected_key = first_node_shot
         self.assertIn(expected_key, blocked)
 
     def test_pending_blocks_merge(self):
@@ -384,7 +384,7 @@ class TestApprovedMerge(unittest.TestCase):
         self.assertEqual(len(blocked), 6)
         detail = self.client.get(f"/api/v1/video-instances/{iid}").json()
         for node in detail["nodes"]:
-            expected_key = f"{iid}:{node['shot_key']}"
+            expected_key = node["shot_key"]
             self.assertIn(expected_key, blocked)
 
     def test_export_gate_keeps_review_check(self):
