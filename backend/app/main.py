@@ -2833,9 +2833,12 @@ class ExportRequest(BaseModel):
 @app.post("/api/v1/video-instances/{instance_id}/merge-preview")
 def create_merge_preview(instance_id: str, req: MergePreviewRequest, db: sqlite3.Connection = Depends(get_db)):
     cursor = db.cursor()
-    ok, reason = can_merge_preview(cursor, instance_id)
+    ok, reason, blocked_shot_keys = can_merge_preview(cursor, instance_id)
     if not ok:
-        raise HTTPException(status_code=400, detail=reason)
+        detail: dict = {"message": reason}
+        if blocked_shot_keys:
+            detail["blocked_shot_keys"] = blocked_shot_keys
+        raise HTTPException(status_code=400, detail=detail)
 
     # Check if already merged
     cursor.execute("SELECT * FROM video_instances WHERE id = ?", (instance_id,))

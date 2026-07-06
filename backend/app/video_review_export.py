@@ -26,19 +26,34 @@ def all_nodes_success(cursor, instance_id: str) -> bool:
     return len(statuses) > 0 and all(s == "success" for s in statuses)
 
 
-def can_merge_preview(cursor, instance_id: str) -> tuple[bool, str]:
-    """Check if an instance can be merged. Returns (ok, reason)."""
+def can_merge_preview(cursor, instance_id: str) -> tuple[bool, str, list]:
+    """Check if an instance can be merged. Returns (ok, reason, blocked_shot_keys)."""
     cursor.execute("SELECT * FROM video_instances WHERE id = ?", (instance_id,))
     inst = cursor.fetchone()
     if not inst:
-        return (False, "Instance not found")
+        return (False, "Instance not found", [])
     cursor.execute("SELECT status FROM batch_tasks WHERE id = ?", (inst["batch_id"],))
     batch = cursor.fetchone()
     if batch and batch["status"] == "archived":
-        return (False, "Archived batch cannot be merged")
+        return (False, "Archived batch cannot be merged", [])
     if not all_nodes_success(cursor, instance_id):
-        return (False, "Not all nodes are success")
-    return (True, "")
+        return (False, "Not all nodes are success", [])
+
+    # Check review_status of reviewable nodes (status='success' AND requires_review=1)
+    cursor.execute(
+        "SELECT shot_key, review_status FROM video_instance_nodes "
+        "WHERE instance_id = ? AND status = 'success' AND requires_review = 1",
+        (instance_id,),
+    )
+    reviewable_nodes = cursor.fetchall()
+    blocked_keys = [
+        f"{instance_id}:{r['shot_key']}"
+        for r in reviewable_nodes if r['review_status'] != 'approved'
+    ]
+    if blocked_keys:
+        return (False, "Not all nodes have been approved yet", blocked_keys)
+
+    return (True, "", [])
 
 
 def create_merge_job(cursor, batch_id: str, instance_id: str, attempt_no: int = 1) -> str:

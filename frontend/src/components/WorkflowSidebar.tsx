@@ -1,6 +1,7 @@
 import React from 'react';
 import { DemoStepLog } from './DemoStepLog';
 import { Package, FileVideo, Layers, Cpu, Play, Eye, CheckCheck, Download, X, AlertTriangle, Image, Upload } from 'lucide-react';
+import { allRequiredShotsApproved, getBlockedShots, getMergeDisabledReason } from '../lib/reviewGate';
 
 interface WorkbenchAsset { id: string; filename: string; url: string; role: string; createdAt: number; }
 
@@ -15,6 +16,7 @@ interface Props {
   onSelectShot?: (shotKey: string) => void; selectedShotKey?: string | null;
   productLine?: 'desk_calendar' | 'wall_calendar'; onSetProductLine?: (pl: 'desk_calendar' | 'wall_calendar') => void;
   motionShotVersion?: 'primary' | 'backup';
+  nodes?: any[];
 }
 
 const SectionCard: React.FC<{ title: string; icon: React.ReactNode; children: React.ReactNode; testid?: string }> =
@@ -50,8 +52,14 @@ const ActionBtn: React.FC<{ testid?: string; onClick: () => void; disabled?: boo
     );
   };
 
-export const WorkflowSidebar: React.FC<Props> = (p) => (
-  <aside data-testid="workflow-sidebar"
+export const WorkflowSidebar: React.FC<Props> = (p) => {
+  const resolvedNodes = p.nodes || p.instance?.nodes || [];
+  const approvedGate = allRequiredShotsApproved(resolvedNodes);
+  const blockedReason = getMergeDisabledReason(resolvedNodes);
+  const blockedShots = getBlockedShots(resolvedNodes);
+
+  return (
+    <aside data-testid="workflow-sidebar"
     className="h-full flex flex-col bg-[#0a0f1a] border-r border-white/5 text-xs">
     <div className="flex-1 min-h-0 overflow-y-auto p-2.5 space-y-2.5">
       {p.error && (
@@ -224,7 +232,9 @@ export const WorkflowSidebar: React.FC<Props> = (p) => (
 
       {p.instance && p.allSuccess && (
         <SectionCard title="操作" icon={<CheckCheck className="w-3 h-3" />} testid="sidebar-section-actions">
-          <ActionBtn testid="merge-preview-button" onClick={p.onMerge} color="purple" icon={<Eye className="w-3 h-3" />}>
+          <ActionBtn testid="merge-preview-button" onClick={p.onMerge} color="purple" icon={<Eye className="w-3 h-3" />}
+            disabled={!approvedGate}
+            disabledReason={!approvedGate ? (blockedReason || '请先审核通过全部分镜') : undefined}>
             合并预览
           </ActionBtn>
           {p.instance.draft_preview_url && (
@@ -236,11 +246,23 @@ export const WorkflowSidebar: React.FC<Props> = (p) => (
           <ActionBtn testid="approve-all-button" onClick={p.onApproveAll} color="green" icon={<CheckCheck className="w-3 h-3" />}>
             全部通过
           </ActionBtn>
-          <ActionBtn testid="export-button" onClick={p.onExport} color="orange" disabled={!p.canExport}
-            disabledReason={!p.canExport ? '审核未通过' : undefined}
+          <ActionBtn testid="export-button" onClick={p.onExport} color="orange" disabled={!p.canExport || !approvedGate}
+            disabledReason={!approvedGate ? (blockedReason || '请先审核通过全部分镜') : (!p.canExport ? '审核未通过' : undefined)}
             icon={<Download className="w-3 h-3" />}>
             导出
           </ActionBtn>
+          {blockedShots.length > 0 && (
+            <div data-testid="approved-merge-gate-panel" className="space-y-1 pt-1 border-t border-white/5">
+              <div data-testid="approved-merge-blocked-list" className="space-y-0.5">
+                {blockedShots.map(b => (
+                  <div key={b.shotKey} className="text-[8px] text-gray-500 px-1 flex items-center gap-1">
+                    <span className="w-1 h-1 rounded-full bg-amber-500/50 flex-shrink-0" />
+                    {b.shotName} · {b.reviewStatus === 'pending' || b.reviewStatus === 'missing' ? '待审核' : b.reviewStatus === 'rejected' ? '未通过' : b.reviewStatus}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {p.instance.final_video_url && (
             <div data-testid="final-video-url" className="text-green-400 text-[9px] break-all px-1 py-1 bg-green-900/10 rounded-lg border border-green-500/10">{p.instance.final_video_url}</div>
           )}
@@ -259,4 +281,5 @@ export const WorkflowSidebar: React.FC<Props> = (p) => (
       <DemoStepLog demoLog={p.demoLog} />
     </div>
   </aside>
-);
+  );
+};

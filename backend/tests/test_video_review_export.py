@@ -12,6 +12,11 @@ from fastapi.testclient import TestClient
 from main import app, init_db
 init_db()
 
+
+def _approve_all_nodes(client, iid):
+    """Approve all reviewable nodes in an instance after generation."""
+    client.post(f"/api/v1/video-instances/{iid}/review", json={"action": "approve"})
+
 def setUpModule(): pass
 def tearDownModule():
     if _fd is not None: os.close(_fd)
@@ -46,6 +51,7 @@ class TestMergePreview(unittest.TestCase):
 
     def test_b_generate_and_merge_success(self):
         self.client.post(f"/api/v1/video-batches/{self.bid}/generate", json={})
+        _approve_all_nodes(self.client, self.iid)
         r = self.client.post(f"/api/v1/video-instances/{self.iid}/merge-preview", json={})
         self.assertEqual(r.status_code, 200)
         d = r.json()
@@ -54,7 +60,10 @@ class TestMergePreview(unittest.TestCase):
         self.assertEqual(d["review_status"], "pending")
 
     def test_c_merge_skipped_when_already_previewed(self):
+        # Approve all nodes first (review_status check added in MVP-4)
+        self.client.post(f"/api/v1/video-instances/{self.iid}/review", json={"action": "approve"})
         r = self.client.post(f"/api/v1/video-instances/{self.iid}/merge-preview", json={})
+        self.assertEqual(r.status_code, 200)
         self.assertTrue(r.json()["skipped"])
 
     def test_d_force_merge_no_skip(self):
@@ -69,6 +78,7 @@ class TestNodeReview(unittest.TestCase):
         cls.client = TestClient(app)
         cls.bid, cls.iid, cls.pid = _ready_batch(cls.client, prefix="NRV")
         cls.client.post(f"/api/v1/video-batches/{cls.bid}/generate", json={})
+        _approve_all_nodes(cls.client, cls.iid)
         cls.client.post(f"/api/v1/video-instances/{cls.iid}/merge-preview", json={})
         detail = cls.client.get(f"/api/v1/video-instances/{cls.iid}").json()
         cls.node_id = detail["nodes"][0]["node_id"]
@@ -104,6 +114,7 @@ class TestInstanceBatchReview(unittest.TestCase):
         cls.client = TestClient(app)
         cls.bid, cls.iid, cls.pid = _ready_batch(cls.client, prefix="IBR")
         cls.client.post(f"/api/v1/video-batches/{cls.bid}/generate", json={})
+        _approve_all_nodes(cls.client, cls.iid)
         cls.client.post(f"/api/v1/video-instances/{cls.iid}/merge-preview", json={})
 
     def test_batch_approve_all_nodes(self):
@@ -131,6 +142,7 @@ class TestExport(unittest.TestCase):
         cls.client = TestClient(app)
         cls.bid, cls.iid, cls.pid = _ready_batch(cls.client, prefix="EXP")
         cls.client.post(f"/api/v1/video-batches/{cls.bid}/generate", json={})
+        _approve_all_nodes(cls.client, cls.iid)
         cls.client.post(f"/api/v1/video-instances/{cls.iid}/merge-preview", json={})
 
     def test_a_export_fails_before_approval(self):
@@ -162,6 +174,7 @@ class TestRetryResetsDelivery(unittest.TestCase):
         os.environ["TESTING"] = "true"
         cls.bid, cls.iid, cls.pid = _ready_batch(cls.client, prefix="RST")
         cls.client.post(f"/api/v1/video-batches/{cls.bid}/generate", json={})
+        _approve_all_nodes(cls.client, cls.iid)
         cls.client.post(f"/api/v1/video-instances/{cls.iid}/merge-preview", json={})
         cls.client.post(f"/api/v1/video-instances/{cls.iid}/review", json={"action":"approve"})
         cls.client.post(f"/api/v1/video-instances/{cls.iid}/export", json={})
@@ -293,6 +306,7 @@ class TestJobQueries(unittest.TestCase):
         cls.client = TestClient(app)
         cls.bid, cls.iid, cls.pid = _ready_batch(cls.client, prefix="JOBQ")
         cls.client.post(f"/api/v1/video-batches/{cls.bid}/generate", json={})
+        _approve_all_nodes(cls.client, cls.iid)
         mr = cls.client.post(f"/api/v1/video-instances/{cls.iid}/merge-preview", json={})
         cls.merge_job_id = mr.json()["merge_job_id"]
         cls.client.post(f"/api/v1/video-instances/{cls.iid}/review", json={"action":"approve"})
@@ -317,6 +331,98 @@ class TestJobQueries(unittest.TestCase):
         reviews = r.json()["reviews"]
         self.assertGreaterEqual(len(reviews), 6)  # 6 nodes approved
         self.assertEqual(reviews[0]["action"], "approve")
+
+
+class TestApprovedMerge(unittest.TestCase):
+    """can_merge_preview checks review_status of nodes (MVP-4)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.client = TestClient(app)
+
+    def test_all_approved_can_merge(self):
+        """All success + all approved -> can_merge_preview True (200)."""
+        bid, iid, _ = _ready_batch(self.client, prefix="APR")
+        self.client.post(f"/api/v1/video-batches/{bid}/generate", json={})
+        # Strict rule: approve first, then merge
+        self.client.post(f"/api/v1/video-instances/{iid}/review", json={"action": "approve"})
+        r = self.client.post(f"/api/v1/video-instances/{iid}/merge-preview", json={})
+        self.assertEqual(r.status_code, 200)
+
+    def test_rejected_blocks_merge(self):
+        """All success + one rejected -> can_merge_preview False."""
+        bid, iid, _ = _ready_batch(self.client, prefix="REJBLK")
+        self.client.post(f"/api/v1/video-batches/{bid}/generate", json={})
+        # First approve to allow merge, then later reject to block
+        self.client.post(f"/api/v1/video-instances/{iid}/review", json={"action": "approve"})
+        self.client.post(f"/api/v1/video-instances/{iid}/merge-preview", json={})
+        # Reject the first node
+        detail = self.client.get(f"/api/v1/video-instances/{iid}").json()
+        first_node_id = detail["nodes"][0]["node_id"]
+        first_node_shot = detail["nodes"][0]["shot_key"]
+        self.client.post(f"/api/v1/video-nodes/{first_node_id}/review", json={"action": "reject", "reason": "bad"})
+        # Merge preview should be blocked
+        r = self.client.post(f"/api/v1/video-instances/{iid}/merge-preview", json={})
+        self.assertEqual(r.status_code, 400)
+        body = r.json()
+        detail_dict = body.get("detail", {})
+        self.assertIn("approved", detail_dict.get("message", ""))
+        blocked = detail_dict.get("blocked_shot_keys", [])
+        expected_key = f"{iid}:{first_node_shot}"
+        self.assertIn(expected_key, blocked)
+
+    def test_pending_blocks_merge(self):
+        """All success + pending review_status -> can_merge_preview False."""
+        bid, iid, _ = _ready_batch(self.client, prefix="PENBLK")
+        self.client.post(f"/api/v1/video-batches/{bid}/generate", json={})
+        r = self.client.post(f"/api/v1/video-instances/{iid}/merge-preview", json={})
+        self.assertEqual(r.status_code, 400)
+        body = r.json()
+        detail_dict = body.get("detail", {})
+        self.assertIn("approved", detail_dict.get("message", ""))
+        blocked = detail_dict.get("blocked_shot_keys", [])
+        self.assertEqual(len(blocked), 6)
+        detail = self.client.get(f"/api/v1/video-instances/{iid}").json()
+        for node in detail["nodes"]:
+            expected_key = f"{iid}:{node['shot_key']}"
+            self.assertIn(expected_key, blocked)
+
+    def test_export_gate_keeps_review_check(self):
+        """Export gate (can_export_instance) must still check review_status."""
+        bid, iid, _ = _ready_batch(self.client, prefix="EXPGT")
+        self.client.post(f"/api/v1/video-batches/{bid}/generate", json={})
+        self.client.post(f"/api/v1/video-instances/{iid}/review", json={"action": "approve"})
+        self.client.post(f"/api/v1/video-instances/{iid}/merge-preview", json={})
+        # Without approval, export should fail
+        r = self.client.post(f"/api/v1/video-instances/{iid}/export", json={})
+        self.assertEqual(r.status_code, 400)
+        # After approval, export should succeed
+        self.client.post(f"/api/v1/video-instances/{iid}/review", json={"action": "approve"})
+        r2 = self.client.post(f"/api/v1/video-instances/{iid}/export", json={})
+        self.assertEqual(r2.status_code, 200)
+
+
+    def test_not_required_blocks_merge(self):
+        """not_required review_status on a required shot blocks merge."""
+        bid, iid, _ = _ready_batch(self.client, prefix="NOTREQ")
+        self.client.post(f"/api/v1/video-batches/{bid}/generate", json={})
+        # Set one node to not_required, leave others pending
+        detail = self.client.get(f"/api/v1/video-instances/{iid}").json()
+        for i, node in enumerate(detail["nodes"]):
+            if i == 0:
+                # Set not_required via direct DB (only way to get this state in tests)
+                import sqlite3
+                db_path = os.environ.get("TEST_DATABASE_PATH", "test.sqlite3")
+                conn = sqlite3.connect(db_path)
+                conn.execute("UPDATE video_instance_nodes SET review_status='not_required' WHERE id=?", (node["node_id"],))
+                conn.commit()
+                conn.close()
+        r = self.client.post(f"/api/v1/video-instances/{iid}/merge-preview", json={})
+        self.assertEqual(r.status_code, 400)
+        body = r.json()
+        detail_dict = body.get("detail", {})
+        blocked = detail_dict.get("blocked_shot_keys", [])
+        self.assertGreaterEqual(len(blocked), 1)  # At least the not_required node must be blocked
 
 
 if __name__ == "__main__":

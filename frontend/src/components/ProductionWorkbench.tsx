@@ -198,6 +198,7 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
             assets={assets} onUploadAssets={handleUploadAssets} onUpdateAssetRole={handleUpdateAssetRole}
             onSelectShot={(sk) => setSelectedNodeId(sk)} selectedShotKey={selectedNodeId}
             productLine={productLine} onSetProductLine={setProductLine} motionShotVersion={motionShotVersion}
+            nodes={nodes}
           />
         </div>
 
