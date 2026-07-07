@@ -267,12 +267,27 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
     onEdgesChangeLocal(changes);
   }, [onEdgesChangeLocal]);
 
+  // React Flow onNodeClick — the proper API for canvas node clicks.
+  // When a shotControlNode is clicked, find its business node and call onSelectNode.
+  // This replaces the removed DOM-click fallback in RightInspectorPanel.
+  const handleNodeClick = useCallback((_event: React.MouseEvent, rfNode: any) => {
+    if (rfNode.type === 'shotControlNode' && rfNode.data?.shot_key) {
+      const sk: string = rfNode.data.shot_key;
+      const nodeItem = nodes.find(nn => nn.shot_key === sk);
+      if (nodeItem) {
+        onSelectNode?.(nodeItem);
+      } else {
+        onSelectNode?.({ shot_key: sk, shot_name: sk, status: 'pending' } as any);
+      }
+    }
+  }, [nodes, onSelectNode]);
+
   return (
     <div data-testid="production-canvas-view" className="h-full flex flex-col bg-[#0a0f1a] overflow-hidden" onDragOver={onDragOver} onDrop={onDrop}>
       <ReactFlowProvider>
         <div className="flex-1 min-h-0 relative">
-          {noData && (<div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-50 mt-16"><Package className="w-10 h-10 text-gray-700 mb-2" /><div className="text-sm text-gray-500">请先创建 video batch</div><div className="text-[11px] text-gray-700 mt-1">系统将按 6 个分镜节点生成模拟视频</div></div>)}
-          <ReactFlow nodes={rfNodes} edges={rfEdges} nodeTypes={shotNodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChangeWrapper} onConnect={onConnect} fitView fitViewOptions={{ padding: 0.15, duration: 0 }} minZoom={0.3} maxZoom={2} nodesDraggable={true} nodesConnectable={true} elementsSelectable={true} proOptions={{ hideAttribution: true }}>
+          {noData && (<div data-testid="canvas-empty-hint" className="absolute top-2 left-2 flex items-center gap-1.5 z-10"><Package className="w-3 h-3 text-gray-600" /><span className="text-[10px] text-gray-600">请先创建 video batch</span></div>)}
+          <ReactFlow nodes={rfNodes} edges={rfEdges} nodeTypes={shotNodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChangeWrapper} onConnect={onConnect} onNodeClick={handleNodeClick} fitView fitViewOptions={{ padding: 0.15, duration: 0 }} minZoom={0.3} maxZoom={2} nodesDraggable={true} nodesConnectable={true} elementsSelectable={true} proOptions={{ hideAttribution: true }}>
             <Background color="#1f2937" gap={16} size={1} />
             <Controls position="bottom-right" showInteractive={false} />
             <CanvasToolbar instance={instance} noData={noData} connectingAssetId={connectingAssetId} onCancelConnecting={onCancelConnecting} />

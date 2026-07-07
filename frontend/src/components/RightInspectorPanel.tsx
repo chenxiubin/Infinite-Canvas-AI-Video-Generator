@@ -67,51 +67,26 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
 
   return (
     <aside data-testid="right-inspector-panel"
-      className="h-full flex flex-col bg-[#0d1117] border-l border-white/5 overflow-hidden text-xs">
-      <div className="flex-shrink-0 flex items-center gap-2 px-3 py-2.5 border-b border-white/5 bg-[#111827]">
-        <Eye className="w-3.5 h-3.5 text-purple-400" />
-        <span className="text-gray-300 font-medium text-[11px] tracking-wide">属性检查器</span>
-        {node && <span className="text-gray-600 text-[10px] ml-auto">{node.shot_key}</span>}
-      </div>
-
-      {/* Empty state — enhanced with production overview */}
+      className={`h-full flex flex-col bg-[#0d1117] border-l border-white/5 overflow-hidden text-xs transition-all duration-300 ease-in-out flex-shrink-0 ${!node ? 'w-[44px]' : 'w-80'}`}>
+      {/* Collapsed empty state — narrow bar with vertical label */}
       {!node && (
-        <div className="flex-1 flex flex-col overflow-y-auto p-4 space-y-3">
-          <div className="text-center py-3">
-            <div className="w-10 h-10 rounded-full bg-[#1a1f2e] flex items-center justify-center mx-auto mb-2">
-              <Eye className="w-4 h-4 text-gray-600" />
-            </div>
-            <div className="text-gray-500 text-[11px]">请在画布中选择一个分镜节点查看详情</div>
-          </div>
-
-          {/* Production overview */}
-          <div className="bg-[#111827] border border-white/5 rounded-xl p-3 space-y-2">
-            <div className="flex items-center gap-1.5 text-gray-500 text-[10px]">
-              <Activity className="w-3 h-3 text-purple-400" /> 当前状态
-            </div>
-            <div className="space-y-1.5 text-[10px]">
-              <div className="flex justify-between"><span className="text-gray-600">模型适配器</span><span className="text-purple-300">{modelAdapter || 'mock'}</span></div>
-              <div className="flex justify-between"><span className="text-gray-600">视频批次</span><span className="text-gray-300">{batchStatus || (instanceId ? '就绪' : '未创建')}</span></div>
-              <div className="flex justify-between"><span className="text-gray-600">分镜节点数</span><span className="text-gray-300">{nodeCount || 0}</span></div>
-            </div>
-          </div>
-
-          {/* Next steps */}
-          <div className="bg-[#111827] border border-white/5 rounded-xl p-3">
-            <div className="text-gray-500 text-[10px] mb-2">下一步操作</div>
-            <div className="space-y-1.5 text-[10px] text-gray-600">
-              <div>1. 在左侧面板创建演示产品</div>
-              <div>2. 选择视频模板</div>
-              <div>3. 创建并生成视频批次</div>
-              <div>4. 点击画布中的分镜节点</div>
-              <div>5. 审核通过后导出视频</div>
-            </div>
+        <div data-testid="inspector-collapsed" className="flex-1 flex items-center justify-center">
+          <div data-testid="inspector-empty-state" className="flex flex-col items-center gap-2 text-gray-600">
+            <Eye className="w-4 h-4" />
+            <span style={{ writingMode: 'vertical-lr', letterSpacing: '0.1em', fontSize: '10px' }} className="text-gray-500 tracking-wider select-none">检查器</span>
           </div>
         </div>
       )}
 
-      {/* Node detail */}
+      {/* Expanded detail panel — shown when a node is selected */}
       {node && (
+        <div data-testid="inspector-expanded" className="flex-1 flex flex-col min-h-0">
+          <div data-testid="inspector-slide-panel" className="flex-1 flex flex-col min-h-0">
+            <div className="flex-shrink-0 flex items-center gap-2 px-3 py-2.5 border-b border-white/5 bg-[#111827]">
+          <Eye className="w-3.5 h-3.5 text-purple-400" />
+          <span className="text-gray-300 font-medium text-[11px] tracking-wide">属性检查器</span>
+          {node && <span className="text-gray-600 text-[10px] ml-auto">{node.shot_key}</span>}
+        </div>
         <div data-testid="canvas-node-detail-panel" className="flex-1 flex flex-col min-h-0 overflow-y-auto" style={{ minHeight: 200 }}>
           {error && (
             <div data-testid="canvas-detail-error-message"
@@ -396,6 +371,8 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
                 )}
               </div>
             )}
+          </div>
+            </div>
           </div>
         </div>
       )}

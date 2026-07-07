@@ -197,7 +197,7 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
 
       {/* Three-column body — CSS Grid */}
       <div data-testid="workbench-shell" className="grid flex-1 min-h-0 overflow-hidden"
-        style={{ gridTemplateColumns: '300px minmax(0, 1fr) 360px' }}>
+        style={{ gridTemplateColumns: 'auto minmax(0, 1fr) auto' }}>
         {/* Left: Workflow Sidebar */}
         <div className="min-h-0 overflow-hidden">
           <WorkflowSidebar

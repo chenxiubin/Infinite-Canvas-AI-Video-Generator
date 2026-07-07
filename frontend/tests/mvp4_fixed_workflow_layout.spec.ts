@@ -28,6 +28,9 @@ test.describe('MVP-4 Fixed Workflow Layout', () => {
 
   test('M4-FixedLayout-03: switch to wall calendar shows wall layout', async ({ page }) => {
     test.setTimeout(30000);
+    // Hover product-line icon to open the localised module panel
+    await page.getByTestId('sidebar-icon-productLine').hover();
+    await expect(page.getByTestId('workflow-sidebar-expanded')).toBeVisible({ timeout: 5000 });
     await page.getByTestId('product-line-wall-calendar').click();
     await expect(page.getByTestId('current-product-line-label')).toContainText('挂历', { timeout: 5000 });
     await expect(page.getByTestId('shot-control-node-S01_main')).toBeAttached({ timeout: 10000 });
@@ -36,8 +39,8 @@ test.describe('MVP-4 Fixed Workflow Layout', () => {
 
   test('M4-FixedLayout-04: click shot control node opens Inspector', async ({ page }) => {
     test.setTimeout(30000);
-    // Click the canvas shot-control-node directly
-    await page.getByTestId('shot-control-node-S01_main').click({ force: true });
+    // Real click — nodrag class on ShotControlNode prevents React Flow interception
+    await page.getByTestId('shot-control-node-S01_main').click();
     await expect(page.getByTestId('canvas-node-detail-panel')).toBeVisible({ timeout: 8000 });
     await expect(page.getByTestId('canvas-detail-shot-key')).toContainText('S01_main', { timeout: 5000 });
   });

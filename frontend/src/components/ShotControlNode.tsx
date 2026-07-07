@@ -37,7 +37,7 @@ export const ShotControlNode: React.FC<Props> = ({ data }) => {
 
   return (
     <div data-testid={`shot-control-node-${sk}`} onClick={() => data.onSelectShot?.(sk)}
-      className={`bg-[#1a1f2e] border border-white/10 hover:border-purple-500/30 rounded-xl p-3 w-44 cursor-pointer transition-colors ${isConnecting ? 'border-purple-400/50 ring-2 ring-purple-500/20' : ''}`}>
+      className={`nodrag bg-[#1a1f2e] border border-white/10 border-l-2 border-l-purple-500/40 hover:border-purple-500/30 rounded-xl p-3 w-44 cursor-pointer transition-colors ${isConnecting ? 'border-purple-400/50 ring-2 ring-purple-500/20' : ''}`}>
       {/* Target handles for asset binding */}
       <Handle type="target" position={Position.Left} id="start_frame" data-testid={`shot-node-start-frame-handle-${sk}`} style={{ top: '20%', background: isConnecting ? '#22c55e' : '#22c55e', width: isConnecting ? 18 : 10, height: isConnecting ? 18 : 10 }} title="首帧图" />
       <Handle type="target" position={Position.Left} id="end_frame" data-testid={`shot-node-end-frame-handle-${sk}`} style={{ top: '50%', background: isConnecting ? '#3b82f6' : '#3b82f6', width: isConnecting ? 18 : 10, height: isConnecting ? 18 : 10 }} title="尾帧图" />
@@ -54,7 +54,7 @@ export const ShotControlNode: React.FC<Props> = ({ data }) => {
           data-testid={`shot-control-generate-${sk}`}
           disabled={disabled || generating}
           onClick={(e) => { e.stopPropagation(); data.onGenerate?.(nodeId, sk); }}
-          className="text-[8px] bg-purple-600/30 text-purple-300 rounded px-2 py-0.5 flex items-center gap-0.5 disabled:opacity-40 disabled:cursor-not-allowed"
+          className="text-[8px] bg-purple-600/50 hover:bg-purple-600/70 text-purple-200 rounded px-2 py-0.5 flex items-center gap-0.5 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           title={disabled ? disabledReason : '生成'}
         >
           {generating ? (
