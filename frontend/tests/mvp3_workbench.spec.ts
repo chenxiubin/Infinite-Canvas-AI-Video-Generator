@@ -45,37 +45,27 @@ test.describe('MVP-3 Production Workbench', () => {
     await expect(page.getByTestId('batch-id')).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId('instance-id')).toBeVisible({ timeout: 5000 });
 
-    // 5. Generate batch — click and poll backend for completion
+    // 5. Generate batch — click and wait for UI state to show success (handleGenerate runs ~18s synchronously)
     await page.getByTestId('generate-batch-button').click();
-    // Extract batch_id and poll via page.evaluate (uses Vite proxy, no CORS)
-    const bidTxt = (await page.getByTestId('batch-id').textContent()) || '';
-    const bid2 = bidTxt.replace('batch_id: ', '').trim();
-    // Poll the backend via the browser fetch (uses Vite proxy)
-    const ok = await page.evaluate(async (b) => {
-      for (let i = 0; i < 30; i++) {
-        const r = await fetch(`/api/v1/video-batches/${b}`);
-        const d = await r.json();
-        if (d.status === 'completed') return true;
-        await new Promise(res => setTimeout(res, 1000));
-      }
-      return false;
-    }, bid2);
-    if (!ok) throw new Error('Batch did not complete');
-    await page.waitForTimeout(2000);
-    if (errors.length > 0) throw new Error(`Browser errors: ${errors.join(' | ')}`);
+    // Wait for UI to reflect completion (hidden node-status spans show success)
     for (const sk of ['S01_main','S02_detail1','S03_detail2','S04_motion','S05_scene','S06_brand']) {
-      await expect(page.getByTestId(`node-status-${sk}`)).toContainText('success', { timeout: 30000 });
+      await expect(page.getByTestId(`node-status-${sk}`)).toContainText('success', { timeout: 60000 });
     }
+    if (errors.length > 0) throw new Error(`Browser errors: ${errors.join(' | ')}`);
 
-    // 6. Merge preview
-    await page.getByTestId('merge-preview-button').click();
-    await expect(page.getByTestId('draft-preview-url')).toContainText('/mock-previews/', { timeout: 15000 });
-
-    // 7. Approve all
+    // 6. Approve all first (merge requires approved gate)
     await page.getByTestId('approve-all-button').click();
     await expect(page.getByTestId('instance-review-status')).toContainText('approved', { timeout: 15000 });
 
-    // 8. Export
+    // 7. Merge preview
+    await page.getByTestId('merge-preview-button').click();
+    await expect(page.getByTestId('draft-preview-url')).toContainText('/mock-previews/', { timeout: 15000 });
+
+    // 8. Re-approve after merge (merge resets review_status to pending)
+    await page.getByTestId('approve-all-button').click();
+    await expect(page.getByTestId('instance-review-status')).toContainText('approved', { timeout: 15000 });
+
+    // 9. Export
     await expect(page.getByTestId('export-button')).toBeEnabled({ timeout: 5000 });
     await page.getByTestId('export-button').click();
     await expect(page.getByTestId('final-video-url')).toContainText('/mock-exports/', { timeout: 15000 });

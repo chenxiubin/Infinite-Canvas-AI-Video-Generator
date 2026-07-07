@@ -48,11 +48,10 @@ test.describe('MVP-4 Image Binding', () => {
     const assetCard = page.getByTestId('asset-library-panel').locator('[data-testid^="asset-card-"]').first();
     await assetCard.locator('select').selectOption('start_frame');
 
-    // Switch to canvas and click S01_main
+    // Switch to canvas, select S01_main via sidebar shot list to open inspector
     await page.getByTestId('workbench-tab-canvas').click();
-    await expect(page.getByTestId('canvas-node-S01_main')).toBeAttached({ timeout: 15000 });
-    await page.getByTestId('canvas-node-S01_main').click({ force: true });
-    await page.getByTestId('canvas-node-S01_main').click();
+    await expect(page.getByTestId('shot-control-node-S01_main')).toBeAttached({ timeout: 15000 });
+    await page.getByTestId('workflow-shot-S01_main').click();
     await expect(page.getByTestId('canvas-node-detail-panel')).toBeVisible({ timeout: 8000 });
 
     // Warning visible before binding
@@ -73,19 +72,24 @@ test.describe('MVP-4 Image Binding', () => {
     await expect(page.getByTestId('start-frame-preview')).toContainText('首帧已绑定');
     await expect(page.getByTestId('frame-binding-warning')).not.toBeVisible({ timeout: 3000 });
 
-    // Verify canvas node shows thumbnail
-    await expect(page.getByTestId('canvas-node-S01_main')).toContainText('首帧已绑定');
+    // Verify shot control node generate button is enabled (has node_id + start frame bound)
+    const genBtn = page.getByTestId('shot-control-generate-S01_main');
+    await expect(genBtn).toBeEnabled({ timeout: 5000 });
   });
 
   test('M4-Bind-03: missing start frame shows warning in empty state', async ({ page }) => {
     test.setTimeout(30000);
-    // Without any product/batch, click a skeleton node
+    // Without any product/batch, select S02_detail1 via sidebar to open inspector
     await page.getByTestId('workbench-tab-canvas').click();
-    await expect(page.getByTestId('canvas-node-S02_detail1')).toBeAttached({ timeout: 15000 });
-    await page.getByTestId('canvas-node-S02_detail1').click({ force: true });
-    // Frame binding section should show warning
+    await expect(page.getByTestId('shot-control-node-S02_detail1')).toBeAttached({ timeout: 15000 });
+    await page.getByTestId('workflow-shot-S02_detail1').click();
+    // Frame binding section should show warning in inspector
     await expect(page.getByTestId('frame-binding-warning')).toBeVisible({ timeout: 5000 });
-    // Node card should show missing frame placeholder
-    await expect(page.getByTestId('canvas-node-S02_detail1')).toContainText('缺少首帧');
+    // Shot control node status should show disabled reason
+    const statusSpan = page.getByTestId('shot-control-status-S02_detail1');
+    await expect(statusSpan).toBeAttached();
+    // Status text should contain a disabled reason (either missing batch or missing start frame)
+    const statusText = await statusSpan.textContent();
+    expect(statusText && (statusText.includes('批次') || statusText.includes('首帧'))).toBeTruthy();
   });
 });

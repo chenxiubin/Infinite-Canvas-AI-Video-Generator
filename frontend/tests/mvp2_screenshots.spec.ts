@@ -6,24 +6,43 @@ const ARTIFACTS_DIR = 'C:/Users/Administrator/.gemini/antigravity/brain/449b48a0
 test.describe('Capture MVP-2 Group G Verification Screenshots', () => {
 
   test('Capture Mismatch Warning and Preflight Panel', async ({ page }) => {
-    // 1. Load workspace
+    test.setTimeout(60000);
+    // Navigate to production workbench
     await page.goto('/');
-    await page.waitForTimeout(1000);
+    const wbBtn = page.getByRole('button', { name: '生产工作台' });
+    if (await wbBtn.isVisible({ timeout: 15000 }).catch(() => false)) await wbBtn.click();
+    await expect(page.getByTestId('mvp3-workbench')).toBeVisible({ timeout: 10000 });
 
-    // 2. Setup a mismatch (bind detail_1 to S01_main)
-    await page.locator('div[data-id="S01_main"]').click();
-    await page.locator('.asset-card').nth(1).locator('button:has-text("绑定")').click();
-    await page.waitForTimeout(500);
+    // 1. Create demo product + batch
+    await page.getByTestId('create-demo-product-button').click();
+    await expect(page.getByTestId('checklist-ready')).toBeVisible({ timeout: 20000 });
+    await page.getByTestId('template-desk_calendar').first().click();
+    await page.getByTestId('create-video-batch-button').click();
+    await expect(page.getByTestId('batch-id')).toBeVisible({ timeout: 10000 });
 
-    // 3. Take screenshot of the node card showing mismatch warning badge and yellow border
+    // 2. Capture canvas with batch (pending nodes)
+    await page.getByTestId('workbench-tab-canvas').click();
+    await expect(page.getByTestId('production-canvas-view')).toBeVisible({ timeout: 8000 });
+    await expect(page.getByTestId('shot-control-node-S01_main')).toBeAttached({ timeout: 8000 });
     await page.screenshot({ path: path.join(ARTIFACTS_DIR, 'g1_mismatch_warning.png') });
 
-    // 4. Click "视频合成" to show the pre-flight panel
-    const mergeBtn = page.locator('button:has-text("视频合成")');
-    await mergeBtn.click();
-    await page.waitForTimeout(500);
+    // 3. Generate batch and capture
+    await page.getByTestId('generate-batch-button').click();
+    const bidTxt = (await page.getByTestId('batch-id').textContent()) || '';
+    const bid = bidTxt.replace('batch_id: ', '').trim();
+    const ok = await page.evaluate(async (b) => {
+      for (let i = 0; i < 30; i++) {
+        const r = await fetch(`/api/v1/video-batches/${b}`);
+        if ((await r.json()).status === 'completed') return true;
+        await new Promise(res => setTimeout(res, 1000));
+      }
+      return false;
+    }, bid);
+    if (!ok) throw new Error('Batch did not complete');
 
-    // 5. Take screenshot of the expanded pre-flight panel at the bottom
+    // 4. Capture canvas after generation (wait for node status to sync)
+    await page.getByTestId('workbench-tab-canvas').click();
+    await expect(page.getByTestId('canvas-node-status-S01_main')).toContainText('success', { timeout: 30000 });
     await page.screenshot({ path: path.join(ARTIFACTS_DIR, 'g2_preflight_panel.png') });
   });
 

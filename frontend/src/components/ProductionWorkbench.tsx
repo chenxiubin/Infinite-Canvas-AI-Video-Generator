@@ -60,10 +60,16 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
       if(bd.instances?.length){const i=await api.getVideoInstance(bd.instances[0].instance_id);setInstance(i);setNodes(i.nodes||[]);}
       await api.generateVideoBatch(bd.batch_id); const fb=await api.getVideoBatch(bd.batch_id);
       if(fb.instances?.length){const fi=await api.getVideoInstance(fb.instances[0].instance_id);setInstance(fi);setNodes(fi.nodes||[]);}
-      addLog('generated success'); await api.mergePreview(fb.instances[0].instance_id);
-      const mi=await api.getVideoInstance(fb.instances[0].instance_id);setInstance(mi);setNodes(mi.nodes||[]);addLog('preview generated');
-      await api.reviewInstance(mi.instance_id,'approve');const ai=await api.getVideoInstance(mi.instance_id);setInstance(ai);setNodes(ai.nodes||[]);addLog('review approved');
-      await api.exportInstance(ai.instance_id);const ei=await api.getVideoInstance(ai.instance_id);setInstance(ei);setNodes(ei.nodes||[]);addLog('mock export completed');
+      addLog('generated success');
+      await api.reviewInstance(fb.instances[0].instance_id, 'approve');
+      const ri = await api.getVideoInstance(fb.instances[0].instance_id);
+      setInstance(ri); setNodes(ri.nodes || []); addLog('review approved');
+      await api.mergePreview(ri.instance_id);
+      const mi = await api.getVideoInstance(ri.instance_id); setInstance(mi); setNodes(mi.nodes || []); addLog('preview generated');
+      // Merge resets review_status to pending — re-approve before export
+      await api.reviewInstance(mi.instance_id, 'approve');
+      const ai = await api.getVideoInstance(mi.instance_id); setInstance(ai); setNodes(ai.nodes || []); addLog('review re-approved');
+      await api.exportInstance(ai.instance_id); const ei = await api.getVideoInstance(ai.instance_id); setInstance(ei); setNodes(ei.nodes || []); addLog('mock export completed');
     }catch(e){showError(e);addLog(`ERROR: ${e?.message||e}`);}finally{setLoading('');}
   };
   const handleReset = () => { assets.forEach(a => { if (a.url?.startsWith('blob:')) URL.revokeObjectURL(a.url); }); setProductId('');setChecklist(null);setBatchId('');setInstance(null);setNodes([]);setSelTemplateId('');setError('');setDemoLog([]);batchIdRef.current='';instanceRef.current=null;setSelectedNodeId(null);setAssets([]);setShotBindings([]);setConnectingAssetId(null);setStoryboardConfigs({});setMotionShotVersion('primary'); };
@@ -218,6 +224,9 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
             onConnectBinding={handleBindShotFrame}
             onDeleteBinding={(shotKey, frameType) => handleBindShotFrame(shotKey, frameType as any, null)}
             onRegenerateShot={handleRegenerateShot}
+            onGenerateSingleShot={handleGenerateSingleShot}
+            generatingShotKeys={generatingShotKeys}
+            productLine={productLine}
             connectingAssetId={connectingAssetId}
             onStartConnecting={setConnectingAssetId}
             onCancelConnecting={() => setConnectingAssetId(null)} />

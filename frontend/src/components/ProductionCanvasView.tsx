@@ -8,6 +8,11 @@ import '@xyflow/react/dist/style.css';
 import { Package } from 'lucide-react';
 import { VideoPreviewNode } from './VideoPreviewNode';
 import { deriveVideoPreviewNodes } from '../lib/videoPreviewNodes';
+import { ReferenceImageNode } from './ReferenceImageNode';
+import { ShotControlNode } from './ShotControlNode';
+import { FixedVideoResultNode } from './FixedVideoResultNode';
+import { MergeNode } from './MergeNode';
+import { produceFixedLayout } from '../lib/fixedWorkflowLayout';
 
 interface NodeItem {
   node_id: string; shot_key: string; shot_name: string; shot_order: number;
@@ -31,6 +36,9 @@ interface Props {
   onStartConnecting?: (assetId: string) => void;
   onCancelConnecting?: () => void;
   onRegenerateShot?: (nodeId: string, shotKey: string) => void;
+  onGenerateSingleShot?: (nodeId: string, shotKey: string) => void;
+  generatingShotKeys?: string[];
+  productLine?: 'desk_calendar' | 'wall_calendar';
 }
 
 const DEFAULT_SHOTS = [
@@ -120,7 +128,7 @@ const MaterialEdge: React.FC<{ id: string; sourceX: number; sourceY: number; tar
   };
 
 const edgeTypes: EdgeTypes = { materialEdge: MaterialEdge };
-const shotNodeTypes: NodeTypes = { workbenchShot: WorkbenchShotNode, workbenchAsset: WorkbenchAssetNode, workbenchVideoPreview: VideoPreviewNode };
+const shotNodeTypes: NodeTypes = { workbenchShot: WorkbenchShotNode, workbenchAsset: WorkbenchAssetNode, workbenchVideoPreview: VideoPreviewNode, referenceImageNode: ReferenceImageNode, shotControlNode: ShotControlNode, fixedVideoResultNode: FixedVideoResultNode, mergeNode: MergeNode };
 
 // ==== Toolbar inside ReactFlow ====
 const CanvasToolbar: React.FC<{ instance: any; noData: boolean; connectingAssetId?: string | null; onCancelConnecting?: () => void }> = ({ instance, noData, connectingAssetId, onCancelConnecting }) => {
@@ -139,24 +147,13 @@ const CanvasToolbar: React.FC<{ instance: any; noData: boolean; connectingAssetI
   </div>);
 };
 
-export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefresh, onSelectNode, assets, shotBindings, onConnectBinding, onDeleteBinding, connectingAssetId, onStartConnecting, onCancelConnecting, onRegenerateShot }) => {
+export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefresh, onSelectNode, assets, shotBindings, onConnectBinding, onDeleteBinding, connectingAssetId, onStartConnecting, onCancelConnecting, onRegenerateShot, onGenerateSingleShot, generatingShotKeys, productLine }) => {
   const noData = !instance || nodes.length === 0;
 
-  // Build shot nodes and base edges
-  const { shotNodes, baseEdges } = useMemo(() => {
-    const makeShot = (item: any, i: number): RFNode => ({ id: item.shot_key, type: 'workbenchShot', position: { x: i * 200, y: 60 }, data: { item, onSelect: onSelectNode, assets: assets || [], binding: (shotBindings || []).find(b => b.shotKey === item.shot_key), connectingAssetId, onConnectBinding } });
-    if (!noData && nodes.length > 0) {
-      const sn: RFNode[] = nodes.map((n, i) => makeShot({ ...n, shot_name: n.shot_name || DEFAULT_SHOTS.find(d => d.shot_key === n.shot_key)?.shot_name || n.shot_key }, i));
-      const be: Edge[] = nodes.slice(0, -1).map((n, i) => ({ id: `e-${n.shot_key}`, source: n.shot_key, target: nodes[i + 1].shot_key, type: 'materialEdge', animated: false }));
-      return { shotNodes: sn, baseEdges: be };
-    }
-    const sn: RFNode[] = DEFAULT_SHOTS.map((s, i) => makeShot({ ...s, status: 'pending', review_status: '-', bound_asset_role: null, bound_asset_source: null }, i));
-    const be: Edge[] = DEFAULT_SHOTS.slice(0, -1).map((s, i) => ({ id: `e-${s.shot_key}`, source: s.shot_key, target: DEFAULT_SHOTS[i + 1].shot_key, type: 'materialEdge', animated: false }));
-    return { shotNodes: sn, baseEdges: be };
-  }, [nodes, noData, assets, shotBindings, onSelectNode, connectingAssetId, onConnectBinding]);
+  // Shot data is sourced from the nodes/shotBindings props; visual nodes are produced by produceFixedLayout below.
 
   // Build asset nodes
-  const assetNodes: RFNode[] = useMemo(() => (assets || []).map((a, i) => ({ id: `asset-${a.id}`, type: 'workbenchAsset', position: { x: 20, y: 300 + i * 130 }, data: { asset: a, connectingAssetId, onStartConnecting }, draggable: true })), [assets, connectingAssetId, onStartConnecting]);
+  const assetNodes: RFNode[] = useMemo(() => (assets || []).map((a, i) => ({ id: `asset-${a.id}`, type: 'workbenchAsset', position: { x: 20, y: 920 + i * 130 }, data: { asset: a, connectingAssetId, onStartConnecting }, draggable: true })), [assets, connectingAssetId, onStartConnecting]);
 
   const handleEdgeDelete = useCallback((edgeId: string) => {
     if (edgeId.startsWith('be-sf-')) { const sk = edgeId.replace('be-sf-', ''); onDeleteBinding?.(sk, 'startFrame'); }
@@ -164,13 +161,14 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
     else if (edgeId.startsWith('be-ref-')) { const parts = edgeId.replace('be-ref-', '').split('-'); onDeleteBinding?.(parts[0], 'reference'); }
   }, [onDeleteBinding]);
 
-  // Build binding edges from shotBindings
+  // Build binding edges from shotBindings — target the ShotControlNode in fixed layout
   const bindingEdges: Edge[] = useMemo(() => {
     const es: Edge[] = [];
     (shotBindings || []).forEach(b => {
-      if (b.startFrameAssetId) es.push({ id: `be-sf-${b.shotKey}`, source: `asset-${b.startFrameAssetId}`, target: b.shotKey, targetHandle: 'start_frame', type: 'materialEdge', data: { bindingType: 'start_frame', label: '首帧', bindingId: b.startFrameBindingId, onDelete: handleEdgeDelete } });
-      if (b.endFrameAssetId) es.push({ id: `be-ef-${b.shotKey}`, source: `asset-${b.endFrameAssetId}`, target: b.shotKey, targetHandle: 'end_frame', type: 'materialEdge', data: { bindingType: 'end_frame', label: '尾帧', bindingId: b.endFrameBindingId, onDelete: handleEdgeDelete } });
-      (b.referenceAssetIds || []).forEach((aid, idx) => { es.push({ id: `be-ref-${b.shotKey}-${idx}`, source: `asset-${aid}`, target: b.shotKey, targetHandle: 'reference_image', type: 'materialEdge', data: { bindingType: 'reference_image', label: '参考图', bindingId: (b.referenceBindingIds || [])[idx], onDelete: handleEdgeDelete } }); });
+      const targetId = `shot-control-node-${b.shotKey}`;
+      if (b.startFrameAssetId) es.push({ id: `be-sf-${b.shotKey}`, source: `asset-${b.startFrameAssetId}`, target: targetId, targetHandle: 'start_frame', type: 'materialEdge', data: { bindingType: 'start_frame', label: '首帧', bindingId: b.startFrameBindingId, onDelete: handleEdgeDelete } });
+      if (b.endFrameAssetId) es.push({ id: `be-ef-${b.shotKey}`, source: `asset-${b.endFrameAssetId}`, target: targetId, targetHandle: 'end_frame', type: 'materialEdge', data: { bindingType: 'end_frame', label: '尾帧', bindingId: b.endFrameBindingId, onDelete: handleEdgeDelete } });
+      (b.referenceAssetIds || []).forEach((aid, idx) => { es.push({ id: `be-ref-${b.shotKey}-${idx}`, source: `asset-${aid}`, target: targetId, targetHandle: 'reference_image', type: 'materialEdge', data: { bindingType: 'reference_image', label: '参考图', bindingId: (b.referenceBindingIds || [])[idx], onDelete: handleEdgeDelete } }); });
     });
     return es;
   }, [shotBindings, handleEdgeDelete]);
@@ -195,8 +193,40 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
   const videoPreviewNodes = videoPreviewResult.nodes;
   const videoPreviewEdges = videoPreviewResult.edges;
 
-  const allNodes = useMemo(() => [...shotNodes, ...assetNodes, ...videoPreviewNodes], [shotNodes, assetNodes, videoPreviewNodes]);
-  const allEdges = useMemo(() => [...baseEdges, ...bindingEdges, ...videoPreviewEdges], [baseEdges, bindingEdges, videoPreviewEdges]);
+  // Generate fixed workflow layout nodes and edges (productLine-dependent)
+  const fixedLayout = useMemo(() => {
+    const raw = produceFixedLayout(productLine || 'desk_calendar');
+    return {
+      nodes: raw.nodes.map(n => {
+        if (n.type === 'shotControlNode') {
+          const sk = n.data.shot_key;
+          const nodeItem = nodes.find(nn => nn.shot_key === sk);
+          const binding = (shotBindings || []).find(b => b.shotKey === sk);
+          const hasStartFrame = !!binding?.startFrameAssetId;
+          const nodeId = nodeItem?.node_id || '';
+          const disabledReason = !nodeId ? '请先生成批次' : !hasStartFrame ? '缺少首帧' : '';
+          n.data = {
+            ...n.data,
+            onSelectShot: (skSel: string) => { const node = nodes.find(nn => nn.shot_key === skSel); if (node) onSelectNode?.(node); else onSelectNode?.({ shot_key: skSel, shot_name: skSel, status: 'pending' } as any); },
+            onGenerate: (nid: string, shotKey: string) => onGenerateSingleShot?.(nid, shotKey),
+            nodeId,
+            hasStartFrame,
+            disabledReason,
+            generating: (generatingShotKeys || []).includes(sk),
+            connectingAssetId,
+            onConnectBinding,
+            nodeStatus: nodeItem?.status || 'pending',
+            nodeReviewStatus: nodeItem?.review_status || '-',
+          };
+        }
+        return n;
+      }),
+      edges: raw.edges,
+    };
+  }, [productLine, nodes, shotBindings, onSelectNode, onGenerateSingleShot, generatingShotKeys, connectingAssetId, onConnectBinding]);
+
+  const allNodes = useMemo(() => [...fixedLayout.nodes, ...assetNodes, ...videoPreviewNodes], [fixedLayout.nodes, assetNodes, videoPreviewNodes]);
+  const allEdges = useMemo(() => [...fixedLayout.edges, ...bindingEdges, ...videoPreviewEdges], [fixedLayout.edges, bindingEdges, videoPreviewEdges]);
 
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState(allNodes);
   const [rfEdges, setRfEdges, onEdgesChangeLocal] = useEdgesState(allEdges);
@@ -209,7 +239,7 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
     if (!connection.target || !connection.source || !connection.targetHandle) return;
     if (!connection.targetHandle.match(/^(start_frame|end_frame|reference_image)$/)) return;
     if (!connection.source.startsWith('asset-')) return;
-    const targetShotKey = connection.target;
+    const targetShotKey = connection.target.startsWith('shot-control-node-') ? connection.target.replace('shot-control-node-', '') : connection.target;
     const assetId = connection.source.replace('asset-', '');
     const bindingType = connection.targetHandle; // 'start_frame'|'end_frame'|'reference_image'
     // Map handle id to frameType: 'start_frame'→'startFrame', 'end_frame'→'endFrame', 'reference_image'→'reference'

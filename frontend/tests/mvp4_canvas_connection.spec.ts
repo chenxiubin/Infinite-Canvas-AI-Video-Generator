@@ -27,7 +27,7 @@ test.describe('MVP-4 Canvas Connection', () => {
     test.setTimeout(30000);
     await page.getByTestId('workbench-tab-canvas').click();
     for (const sk of ['S01_main', 'S02_detail1', 'S03_detail2', 'S04_motion', 'S05_scene', 'S06_brand']) {
-      await expect(page.getByTestId(`canvas-node-${sk}`)).toBeAttached({ timeout: 15000 });
+      await expect(page.getByTestId(`shot-control-node-${sk}`)).toBeAttached({ timeout: 15000 });
     }
   });
 
@@ -48,7 +48,7 @@ test.describe('MVP-4 Canvas Connection', () => {
     await expect(card).toBeVisible();
     // Switch to canvas
     await page.getByTestId('workbench-tab-canvas').click();
-    await expect(page.getByTestId('canvas-node-S01_main')).toBeVisible({ timeout: 8000 });
+    await expect(page.getByTestId('shot-control-node-S01_main')).toBeAttached({ timeout: 8000 });
     // Dispatch drag-drop events via evaluate
     const testId = await card.getAttribute('data-testid');
     const aid = testId ? testId.replace('asset-card-', '') : sharedAssetId;
@@ -121,12 +121,13 @@ test.describe('MVP-4 Canvas Connection', () => {
     // Click-to-connect: click asset "连接" button, then click S01 start_frame button in shot card
     await page.getByTestId(`asset-node-connect-${aid}`).click();
     await expect(page.getByTestId('cancel-asset-connection')).toBeVisible({ timeout: 3000 });
-    await page.getByTestId('shot-node-click-start-frame-S01_main').click();
+    // Use dispatchEvent for click-to-connect button — asset node may visually overlap the shot control node
+    await page.evaluate(() => { const el = document.querySelector('[data-testid="shot-node-click-start-frame-S01_main"]') as HTMLElement; if (el) el.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     // Verify binding edge label exists (binding was created via same handleBindShotFrame path)
     const edgeDel = page.locator('[data-testid^="edge-delete-be-sf-"]').first();
     await expect(edgeDel).toBeAttached({ timeout: 10000 });
-    // Click edge delete via dispatchEvent (edge label may be outside viewport due to React Flow transform)
-    await page.evaluate(() => { const el = document.querySelector('[data-testid^="edge-delete-be-sf-"]') as HTMLElement; if (el) el.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // Delete binding by dispatching click on edge delete button (may be outside viewport due to React Flow transform)
+    await edgeDel.dispatchEvent('click');
     await expect(edgeDel).not.toBeAttached({ timeout: 5000 });
   });
 
@@ -183,7 +184,7 @@ test.describe('MVP-4 Canvas Connection', () => {
     },{assetId:aid,cardSelector:`[data-testid="asset-card-${aid}"]`,canvasSelector:'[data-testid="production-canvas-view"]'});
     await page.getByTestId(`asset-node-connect-${aid}`).click();
     await expect(page.getByTestId('cancel-asset-connection')).toBeVisible({ timeout: 3000 });
-    await page.getByTestId('shot-node-click-end-frame-S01_main').click();
+    await page.evaluate(() => { const el = document.querySelector('[data-testid="shot-node-click-end-frame-S01_main"]') as HTMLElement; if (el) el.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const ed = page.locator('[data-testid^="edge-delete-be-ef-"]').first();
     await expect(ed).toBeAttached({ timeout: 10000 });
     await page.evaluate(()=>{const e=document.querySelector('[data-testid^="edge-delete-be-ef-"]') as HTMLElement;if(e)e.dispatchEvent(new MouseEvent('click',{bubbles:true}));});

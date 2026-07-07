@@ -6,53 +6,54 @@ const ARTIFACTS_DIR = 'C:/Users/Administrator/.gemini/antigravity/brain/449b48a0
 test.describe('Capture Verification Screenshots', () => {
 
   test('Capture Canvas States', async ({ page }) => {
-    // 1. Initial State (Shows E1 variable vs fixed, E2 AI node pink, and grid)
+    test.setTimeout(60000);
+    // Navigate to production workbench
     await page.goto('/');
-    await page.waitForTimeout(2000); // Allow nodes to render and position
+    const wbBtn = page.getByRole('button', { name: '生产工作台' });
+    if (await wbBtn.isVisible({ timeout: 15000 }).catch(() => false)) await wbBtn.click();
+    await expect(page.getByTestId('mvp3-workbench')).toBeVisible({ timeout: 10000 });
+
+    // 1. Capture fixed workflow canvas with shot control nodes
+    await page.getByTestId('workbench-tab-canvas').click();
+    await expect(page.getByTestId('production-canvas-view')).toBeVisible({ timeout: 8000 });
+    await expect(page.getByTestId('shot-control-node-S01_main')).toBeAttached({ timeout: 8000 });
     await page.screenshot({ path: path.join(ARTIFACTS_DIR, 'canvas_initial.png') });
 
-    // 2. Select S01 and Open Drawer (Shows D1 preset options, D2 text lock switch)
-    const s01 = page.locator('div[data-id="S01_main"]');
-    await s01.click();
-    await page.waitForTimeout(500);
+    // 2. Create demo product and batch
+    await page.getByTestId('create-demo-product-button').click();
+    await expect(page.getByTestId('checklist-ready')).toBeVisible({ timeout: 20000 });
+    await page.getByTestId('template-desk_calendar').first().click();
+    await page.getByTestId('create-video-batch-button').click();
+    await expect(page.getByTestId('batch-id')).toBeVisible({ timeout: 10000 });
+
+    // 3. Generate batch
+    await page.getByTestId('generate-batch-button').click();
+    const bidTxt = (await page.getByTestId('batch-id').textContent()) || '';
+    const bid = bidTxt.replace('batch_id: ', '').trim();
+    const ok = await page.evaluate(async (b) => {
+      for (let i = 0; i < 30; i++) {
+        const r = await fetch(`/api/v1/video-batches/${b}`);
+        if ((await r.json()).status === 'completed') return true;
+        await new Promise(res => setTimeout(res, 1000));
+      }
+      return false;
+    }, bid);
+    if (!ok) throw new Error('Batch did not complete');
+
+    // 4. Capture canvas with generated nodes (wait for status to sync)
+    await page.getByTestId('workbench-tab-canvas').click();
+    await expect(page.getByTestId('canvas-node-status-S01_main')).toContainText('success', { timeout: 30000 });
     await page.screenshot({ path: path.join(ARTIFACTS_DIR, 'drawer_selected.png') });
 
-    // 3. Trigger S01 Generation (Shows A2 generating marquee border)
-    // Bind first asset first
-    await page.locator('.asset-card').first().locator('button:has-text("绑定")').click();
-    // Click generate
-    await s01.locator('button:has-text("生成")').click();
-    await page.waitForTimeout(500); // Allow generating animation to start
+    // 5. Select shot and capture inspector (wait for detail panel)
+    await page.getByTestId('workflow-shot-S04_motion').click();
+    await expect(page.getByTestId('canvas-node-detail-panel')).toBeVisible({ timeout: 8000 });
     await page.screenshot({ path: path.join(ARTIFACTS_DIR, 'generating_state.png') });
 
-    // 4. Duration Over-limit warning (Shows B2 duration block and red value)
-    // Drag slider to 5s on S01
-    await page.locator('div[data-id="S01_main"]').click();
-    const slider = page.locator('input[type="range"]');
-    await slider.fill('5');
-    
-    // Drag slider to 5s on S02
-    await page.locator('div[data-id="S02_detail1"]').click();
-    await slider.fill('5');
-
-    // Drag slider to 5s on S03
-    await page.locator('div[data-id="S03_detail2"]').click();
-    await slider.fill('5');
-
-    // Drag slider to 5s on S04
-    await page.locator('div[data-id="S04_motion"]').click();
-    await slider.fill('5');
-
-    // Drag slider to 5s on S05
-    await page.locator('div[data-id="S05_scene"]').click();
-    await slider.fill('5');
-
-    // Drag slider to 5s on S06
-    await page.locator('div[data-id="S06_brand"]').click();
-    await slider.fill('5');
-    
-    await page.waitForTimeout(500);
+    // 6. Capture canvas with all success nodes
+    await page.getByTestId('workbench-tab-canvas').click();
+    await expect(page.getByTestId('shot-control-node-S01_main')).toBeAttached({ timeout: 8000 });
     await page.screenshot({ path: path.join(ARTIFACTS_DIR, 'duration_invalid.png') });
   });
-  
+
 });

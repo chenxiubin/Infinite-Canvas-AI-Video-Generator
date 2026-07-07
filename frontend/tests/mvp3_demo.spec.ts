@@ -11,13 +11,13 @@ test.describe('MVP-3 Demo Flow', () => {
   });
 
   test('M3-Demo: full demo flow', async ({ page }) => {
-    test.setTimeout(60000);
+    test.setTimeout(120000);
 
     // Click one-click demo
     await page.getByTestId('run-full-demo-button').click();
 
-    // Wait for demo complete message
-    await expect(page.getByTestId('demo-complete-message')).toBeVisible({ timeout: 30000 });
+    // Wait for demo complete message (demo now does approve→merge→re-approve→export, ~35s)
+    await expect(page.getByTestId('demo-complete-message')).toBeVisible({ timeout: 120000 });
 
     // Verify demo step log has entries
     const log = page.getByTestId('demo-step-log');
@@ -36,16 +36,16 @@ test.describe('MVP-3 Demo Flow', () => {
   });
 
   test('M3-Demo: canvas after full demo', async ({ page }) => {
-    test.setTimeout(60000);
+    test.setTimeout(120000);
 
     await page.getByTestId('run-full-demo-button').click();
-    await expect(page.getByTestId('demo-complete-message')).toBeVisible({ timeout: 30000 });
+    await expect(page.getByTestId('demo-complete-message')).toBeVisible({ timeout: 90000 });
 
     // Switch to canvas
     await page.getByTestId('workbench-tab-canvas').click();
     await expect(page.getByTestId('production-canvas-view')).toBeVisible({ timeout: 8000 });
 
-    // Verify canvas shows success nodes and export URL
+    // Verify canvas shows success nodes and export URL (via hidden spans in shot-control nodes)
     for (const sk of ['S01_main','S02_detail1','S03_detail2','S04_motion','S05_scene','S06_brand']) {
       await expect(page.getByTestId(`canvas-node-status-${sk}`)).toContainText('success', { timeout: 10000 });
     }
@@ -54,10 +54,10 @@ test.describe('MVP-3 Demo Flow', () => {
   });
 
   test('M3-Demo: reset local state', async ({ page }) => {
-    test.setTimeout(30000);
+    test.setTimeout(120000);
 
     await page.getByTestId('run-full-demo-button').click();
-    await expect(page.getByTestId('demo-complete-message')).toBeVisible({ timeout: 30000 });
+    await expect(page.getByTestId('demo-complete-message')).toBeVisible({ timeout: 90000 });
 
     // Click reset
     await page.getByTestId('reset-current-state-button').click();
