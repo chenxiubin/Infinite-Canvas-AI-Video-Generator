@@ -39,12 +39,15 @@ interface Props {
   onGenerateSingleShot?: (nodeId: string, shotKey: string) => void;
   generatingShotKeys?: string[];
   productLine?: 'desk_calendar' | 'wall_calendar';
-  // Reference image node interactions (10D-1)
+  // Reference image node interactions (10D-1 / 10D-2)
   hoveredRefNodeId?: string | null;
   onHoverRefNode?: (nodeId: string | null) => void;
   onDropImageToRefNode?: (nodeId: string, file: File) => void;
   onDropImageToCanvas?: (file: File, canvasPos: { x: number; y: number }) => void;
   refImageUrls?: Record<string, string>;
+  freeRefNodes?: { id: string; imageAssetId: string; position: { x: number; y: number } }[];
+  imageAssets?: { id: string; name: string; url: string; mimeType: string; createdAt: number; source: string }[];
+  onDeleteFreeRefNode?: (nodeId: string) => void;
 }
 
 const DEFAULT_SHOTS = [
@@ -153,7 +156,7 @@ const CanvasToolbar: React.FC<{ instance: any; noData: boolean; connectingAssetI
   </div>);
 };
 
-export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefresh, onSelectNode, assets, shotBindings, onConnectBinding, onDeleteBinding, connectingAssetId, onStartConnecting, onCancelConnecting, onRegenerateShot, onGenerateSingleShot, generatingShotKeys, productLine, hoveredRefNodeId, onHoverRefNode, onDropImageToRefNode, onDropImageToCanvas, refImageUrls }) => {
+export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefresh, onSelectNode, assets, shotBindings, onConnectBinding, onDeleteBinding, connectingAssetId, onStartConnecting, onCancelConnecting, onRegenerateShot, onGenerateSingleShot, generatingShotKeys, productLine, hoveredRefNodeId, onHoverRefNode, onDropImageToRefNode, onDropImageToCanvas, refImageUrls, freeRefNodes, imageAssets, onDeleteFreeRefNode }) => {
   const noData = !instance || nodes.length === 0;
 
   // Shot data is sourced from the nodes/shotBindings props; visual nodes are produced by produceFixedLayout below.
@@ -241,7 +244,31 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
     };
   }, [productLine, nodes, shotBindings, onSelectNode, onGenerateSingleShot, generatingShotKeys, connectingAssetId, onConnectBinding, hoveredRefNodeId, onHoverRefNode, onDropImageToRefNode, refImageUrls]);
 
-  const allNodes = useMemo(() => [...fixedLayout.nodes, ...assetNodes, ...videoPreviewNodes], [fixedLayout.nodes, assetNodes, videoPreviewNodes]);
+  // 10D-2: Build free reference nodes (dropped on canvas blank area)
+  const freeRefNodesRf: RFNode[] = useMemo(() => (freeRefNodes || []).map(frn => {
+    const imgAsset = (imageAssets || []).find(a => a.id === frn.imageAssetId);
+    return {
+      id: frn.id,
+      type: 'referenceImageNode',
+      position: frn.position,
+      data: {
+        shot_key: '', shot_name: '自由参考图', ref_index: -1,
+        role_label: imgAsset?.name || '未命名',
+        product_line: productLine || 'desk_calendar',
+        imageUrl: imgAsset?.url,
+        isHovered: hoveredRefNodeId === frn.id,
+        isFreeNode: true,
+        freeNodeId: frn.id,
+        onHoverStart: (nodeId: string) => onHoverRefNode?.(nodeId),
+        onHoverEnd: () => onHoverRefNode?.(null),
+        onDropImage: (nodeId: string, file: File) => onDropImageToRefNode?.(nodeId, file),
+        onDeleteFreeNode: () => onDeleteFreeRefNode?.(frn.id),
+      },
+      draggable: true,
+    };
+  }), [freeRefNodes, imageAssets, productLine, hoveredRefNodeId, onHoverRefNode, onDropImageToRefNode, onDeleteFreeRefNode]);
+
+  const allNodes = useMemo(() => [...fixedLayout.nodes, ...assetNodes, ...videoPreviewNodes, ...freeRefNodesRf], [fixedLayout.nodes, assetNodes, videoPreviewNodes, freeRefNodesRf]);
   const allEdges = useMemo(() => [...fixedLayout.edges, ...bindingEdges, ...videoPreviewEdges], [fixedLayout.edges, bindingEdges, videoPreviewEdges]);
 
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState(allNodes);
@@ -295,8 +322,6 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
   }, [onEdgesChangeLocal]);
 
   // React Flow onNodeClick — the proper API for canvas node clicks.
-  // When a shotControlNode is clicked, find its business node and call onSelectNode.
-  // This replaces the removed DOM-click fallback in RightInspectorPanel.
   const handleNodeClick = useCallback((_event: React.MouseEvent, rfNode: any) => {
     if (rfNode.type === 'shotControlNode' && rfNode.data?.shot_key) {
       const sk: string = rfNode.data.shot_key;
@@ -307,7 +332,19 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
         onSelectNode?.({ shot_key: sk, shot_name: sk, status: 'pending' } as any);
       }
     }
-  }, [nodes, onSelectNode]);
+    // 10D-2: Clicking a free reference node selects it in Inspector
+    if (rfNode.type === 'referenceImageNode' && rfNode.data?.isFreeNode) {
+      const imgAsset = (imageAssets || []).find(a => a.id === rfNode.data?.imageAssetId);
+      onSelectNode?.({
+        node_id: rfNode.id, shot_key: rfNode.id,
+        shot_name: imgAsset?.name || '自由参考图',
+        status: 'ready', review_status: '-',
+        // Attach free-node metadata for Inspector display
+        _freeNodeId: rfNode.id,
+        _freeNodeImageUrl: rfNode.data?.imageUrl,
+      } as any);
+    }
+  }, [nodes, onSelectNode, imageAssets]);
 
   return (
     <div data-testid="production-canvas-view" className="h-full flex flex-col bg-[#0a0f1a] overflow-hidden" onDragOver={onDragOver} onDrop={onDrop}>

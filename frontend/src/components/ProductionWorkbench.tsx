@@ -14,6 +14,12 @@ interface InstanceData { instance_id: string; status: string; draft_preview_url?
 interface WorkbenchAsset { id: string; filename: string; url: string; role: string; createdAt: number; backendAssetId?: string; }
 interface ShotFrameBinding { shotKey: string; startFrameAssetId?: string; startFrameBindingId?: string; endFrameAssetId?: string; endFrameBindingId?: string; referenceAssetIds?: string[]; referenceBindingIds?: string[]; }
 
+// 10D-2: Mock image asset — kept in a front-end-only library, separate from WorkbenchAsset
+interface ImageAsset { id: string; name: string; url: string; mimeType: string; createdAt: number; source: 'drop-canvas' | 'drop-reference-node'; }
+
+// 10D-2: Free-standing reference image node (not part of fixed layout)
+interface FreeRefNode { id: string; imageAssetId: string; position: { x: number; y: number }; }
+
 export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = ({ onSwitchToLegacy }) => {
   const [error, setError] = useState(''); const [loading, setLoading] = useState('');
   const [demoLog, setDemoLog] = useState<string[]>([]); const [productId, setProductId] = useState('');
@@ -35,6 +41,9 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
 	// 10D-1: Reference image node interactions
 	const [hoveredRefNodeId, setHoveredRefNodeId] = useState<string | null>(null);
 	const [refImageUrls, setRefImageUrls] = useState<Record<string, string>>({});
+	// 10D-2: Mock image asset library + free reference nodes
+	const [imageAssets, setImageAssets] = useState<ImageAsset[]>([]);
+	const [freeRefNodes, setFreeRefNodes] = useState<FreeRefNode[]>([]);
 
   const batchIdRef = useRef(''); const instanceRef = useRef<InstanceData | null>(null);
   useEffect(() => { batchIdRef.current = batchId; }, [batchId]);
@@ -75,7 +84,7 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
       await api.exportInstance(ai.instance_id); const ei = await api.getVideoInstance(ai.instance_id); setInstance(ei); setNodes(ei.nodes || []); addLog('mock export completed');
     }catch(e){showError(e);addLog(`ERROR: ${e?.message||e}`);}finally{setLoading('');}
   };
-  const handleReset = () => { assets.forEach(a => { if (a.url?.startsWith('blob:')) URL.revokeObjectURL(a.url); }); Object.values(refImageUrls).forEach(u => { if (u?.startsWith('blob:')) URL.revokeObjectURL(u); }); setProductId('');setChecklist(null);setBatchId('');setInstance(null);setNodes([]);setSelTemplateId('');setError('');setDemoLog([]);batchIdRef.current='';instanceRef.current=null;setSelectedNodeId(null);setAssets([]);setShotBindings([]);setConnectingAssetId(null);setStoryboardConfigs({});setMotionShotVersion('primary');setRefImageUrls({}); };
+  const handleReset = () => { assets.forEach(a => { if (a.url?.startsWith('blob:')) URL.revokeObjectURL(a.url); }); Object.values(refImageUrls).forEach(u => { if (u?.startsWith('blob:')) URL.revokeObjectURL(u); }); imageAssets.forEach(a => { if (a.url?.startsWith('blob:')) URL.revokeObjectURL(a.url); }); setProductId('');setChecklist(null);setBatchId('');setInstance(null);setNodes([]);setSelTemplateId('');setError('');setDemoLog([]);batchIdRef.current='';instanceRef.current=null;setSelectedNodeId(null);setAssets([]);setShotBindings([]);setConnectingAssetId(null);setStoryboardConfigs({});setMotionShotVersion('primary');setRefImageUrls({});setImageAssets([]);setFreeRefNodes([]); };
   const assetsRef = useRef(assets); assetsRef.current = assets;
   useEffect(() => { return () => { assetsRef.current.forEach(a => { if (a.url?.startsWith('blob:')) URL.revokeObjectURL(a.url); }); }; }, []);
 
@@ -187,28 +196,53 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
   const canExport = instance?.review_status==='approved';
   const isReady = checklist?.is_ready;
 
-  // 10D-1: Reference image drop handler — replaces node image with object URL
+  // 10D-2: Reference image drop handler — adds to image library + replaces node image
   const handleDropImageToRefNode = useCallback((nodeId: string, file: File) => {
     const blobUrl = URL.createObjectURL(file);
+    const imgAsset: ImageAsset = {
+      id: `img_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      name: file.name || '未命名图片',
+      url: blobUrl,
+      mimeType: file.type,
+      createdAt: Date.now(),
+      source: 'drop-reference-node',
+    };
+    setImageAssets(prev => [...prev, imgAsset]);
     setRefImageUrls(prev => {
-      // Revoke previous blob URL for this node if exists
       if (prev[nodeId]?.startsWith('blob:')) URL.revokeObjectURL(prev[nodeId]);
       return { ...prev, [nodeId]: blobUrl };
     });
   }, []);
 
-  // 10D-1: Canvas blank area image drop — basic callback, full logic deferred to 10D-2
-  const handleDropImageToCanvas = useCallback((_file: File, canvasPos: { x: number; y: number }) => {
-    // TODO 10D-2: Create a free-position ReferenceImageNode at canvasPos
-    // For now, just log position — the callback pathway is established
-    console.log('[10D-2 TODO] Drop image to canvas at', canvasPos);
+  // 10D-2: Canvas blank area image drop — adds to library + creates free ReferenceImageNode
+  const handleDropImageToCanvas = useCallback((file: File, canvasPos: { x: number; y: number }) => {
+    const blobUrl = URL.createObjectURL(file);
+    const imgAsset: ImageAsset = {
+      id: `img_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      name: file.name || '未命名图片',
+      url: blobUrl,
+      mimeType: file.type,
+      createdAt: Date.now(),
+      source: 'drop-canvas',
+    };
+    setImageAssets(prev => [...prev, imgAsset]);
+    const freeId = `free-ref-${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    setFreeRefNodes(prev => [...prev, { id: freeId, imageAssetId: imgAsset.id, position: canvasPos }]);
   }, []);
 
-  // 10D-1: Revoke blob URLs on unmount
+  // 10D-2: Delete free reference node (does NOT delete the image from library)
+  const handleDeleteFreeRefNode = useCallback((nodeId: string) => {
+    setFreeRefNodes(prev => prev.filter(n => n.id !== nodeId));
+  }, []);
+
+  // Revoke blob URLs on unmount
   useEffect(() => {
     return () => {
       Object.values(refImageUrls).forEach(url => {
         if (url?.startsWith('blob:')) URL.revokeObjectURL(url);
+      });
+      imageAssets.forEach(a => {
+        if (a.url?.startsWith('blob:')) URL.revokeObjectURL(a.url);
       });
     };
   }, []);
@@ -241,7 +275,7 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
             assets={assets} onUploadAssets={handleUploadAssets} onUpdateAssetRole={handleUpdateAssetRole}
             onSelectShot={(sk) => setSelectedNodeId(sk)} selectedShotKey={selectedNodeId}
             productLine={productLine} onSetProductLine={setProductLine} motionShotVersion={motionShotVersion}
-            nodes={nodes}
+            nodes={nodes} imageAssets={imageAssets}
           />
         </div>
 
@@ -264,6 +298,9 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
             onDropImageToRefNode={handleDropImageToRefNode}
             onDropImageToCanvas={handleDropImageToCanvas}
             refImageUrls={refImageUrls}
+            freeRefNodes={freeRefNodes}
+            imageAssets={imageAssets}
+            onDeleteFreeRefNode={handleDeleteFreeRefNode}
           />
         </main>
 

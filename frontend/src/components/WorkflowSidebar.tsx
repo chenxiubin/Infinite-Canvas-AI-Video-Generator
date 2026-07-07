@@ -17,6 +17,8 @@ interface Props {
   productLine?: 'desk_calendar' | 'wall_calendar'; onSetProductLine?: (pl: 'desk_calendar' | 'wall_calendar') => void;
   motionShotVersion?: 'primary' | 'backup';
   nodes?: any[];
+  // 10D-2: Mock image asset library for display in assets module
+  imageAssets?: { id: string; name: string; url: string; mimeType: string; createdAt: number; source: string }[];
 }
 
 const SectionCard: React.FC<{ title: string; icon: React.ReactNode; children: React.ReactNode; testid?: string }> =
@@ -206,6 +208,31 @@ export const WorkflowSidebar: React.FC<Props> = (p) => {
           )}
         </div>
       </SectionCard>
+      {/* 10D-2: Mock image library — shows images dropped on canvas or reference nodes */}
+      {(p.imageAssets || []).length > 0 && (
+        <SectionCard title="图片素材库" icon={<Image className="w-3 h-3" />} testid="sidebar-section-image-library">
+          <div data-testid="image-asset-library-panel" className="max-h-44 overflow-y-auto space-y-1">
+            {(p.imageAssets || []).map(a => (
+              <div key={a.id} data-testid={`image-asset-card-${a.id}`} draggable
+                onDragStart={e => {
+                  e.dataTransfer.setData('application/workbench-asset', JSON.stringify({
+                    id: a.id, filename: a.name, url: a.url, role: 'reference', createdAt: a.createdAt
+                  }));
+                  e.dataTransfer.effectAllowed = 'move';
+                }}
+                className="flex items-center gap-2 bg-[#0a0f1a] border border-white/5 rounded-lg p-1.5 cursor-grab active:cursor-grabbing hover:border-purple-500/30 transition-colors">
+                <img src={a.url} alt={a.name} className="w-8 h-8 rounded object-cover flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[10px] text-gray-300 truncate">{a.name}</div>
+                  <div className="text-[8px] text-gray-600">
+                    {a.source === 'drop-canvas' ? '画布拖入' : '节点拖入'} · {a.mimeType.split('/')[1] || a.mimeType}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      )}
     </div>
   );
 

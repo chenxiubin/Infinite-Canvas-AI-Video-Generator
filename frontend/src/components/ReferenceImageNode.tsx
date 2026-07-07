@@ -10,6 +10,9 @@ interface Props {
     onHoverStart?: (nodeId: string) => void;
     onHoverEnd?: (nodeId: string) => void;
     onDropImage?: (nodeId: string, file: File) => void;
+    // 10D-2: Free node support
+    isFreeNode?: boolean;
+    onDeleteFreeNode?: () => void;
   };
 }
 
@@ -114,7 +117,17 @@ export const ReferenceImageNode: React.FC<Props> = ({ id, data }) => {
           </>
         )}
       </div>
-      <div className="text-[8px] text-gray-600 mt-1 text-center truncate">{sk}</div>
+      <div className="text-[8px] text-gray-600 mt-1 text-center truncate">{data.isFreeNode ? (data.role_label || '自由参考图') : sk}</div>
+      {/* 10D-2: Delete button for free reference nodes */}
+      {data.isFreeNode && data.onDeleteFreeNode && (
+        <button
+          data-testid={`delete-free-ref-node-${id}`}
+          onClick={(e) => { e.stopPropagation(); data.onDeleteFreeNode?.(); }}
+          className="mt-1 w-full text-[8px] text-red-500 hover:text-red-300 hover:bg-red-900/20 rounded py-0.5 transition-colors"
+        >
+          删除
+        </button>
+      )}
     </div>
   );
 };
