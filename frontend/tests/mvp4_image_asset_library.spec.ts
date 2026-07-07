@@ -223,4 +223,151 @@ test.describe('MVP-4 10D-2 Image Asset Library', () => {
     // No re-generate prompt should appear
     await expect(page.locator('text=是否重新生成')).toBeHidden({ timeout: 2000 });
   });
+
+  // ── 10D-3 Dedup tests ──
+
+  test('10D3-dedup-01: same file dropped twice adds only one library entry', async ({ page }) => {
+    test.setTimeout(30000);
+    // Drop on S01 ref node
+    const refNode = page.getByTestId('reference-image-node-S01_main-0');
+    await refNode.evaluate((el, pngBytes) => {
+      const file = new File([new Uint8Array(pngBytes)], 'dedup-same.png', { type: 'image/png' });
+      const dt = new DataTransfer(); dt.items.add(file);
+      el.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    }, MINI_PNG_BYTES);
+    // Check library count
+    await page.getByTestId('sidebar-icon-assets').hover();
+    await expect(page.getByTestId('image-asset-library-panel')).toBeVisible({ timeout: 5000 });
+    const firstCount = await page.locator('[data-testid^="image-asset-card-"]').count();
+    // Drop same file again on S02 ref node
+    await page.getByTestId('sidebar-icon-assets').hover(); // close/reopen
+    const refNode2 = page.getByTestId('reference-image-node-S02_detail1-0');
+    await refNode2.evaluate((el, pngBytes) => {
+      const file = new File([new Uint8Array(pngBytes)], 'dedup-same.png', { type: 'image/png' });
+      const dt = new DataTransfer(); dt.items.add(file);
+      el.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    }, MINI_PNG_BYTES);
+    // Library count should remain the same
+    await page.getByTestId('sidebar-icon-assets').hover();
+    await expect(page.getByTestId('image-asset-library-panel')).toBeVisible({ timeout: 5000 });
+    const secondCount = await page.locator('[data-testid^="image-asset-card-"]').count();
+    expect(secondCount).toBe(firstCount);
+  });
+
+  test('10D3-dedup-02: same file dropped to canvas twice adds only one library entry, both nodes show image', async ({ page }) => {
+    test.setTimeout(30000);
+    const canvas = page.getByTestId('production-canvas-view');
+    const canvasBox = await canvas.boundingBox();
+    expect(canvasBox).not.toBeNull();
+    // Drop once
+    await canvas.evaluate((el, { pngBytes, cx, cy }) => {
+      const file = new File([new Uint8Array(pngBytes)], 'canvas-dup.png', { type: 'image/png' });
+      const dt = new DataTransfer(); dt.items.add(file);
+      const ev = new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true, clientX: cx + 100, clientY: cy + 100 });
+      Object.defineProperty(ev, 'clientX', { value: cx + 100 }); Object.defineProperty(ev, 'clientY', { value: cy + 100 });
+      el.dispatchEvent(ev);
+    }, { pngBytes: MINI_PNG_BYTES, cx: canvasBox!.x, cy: canvasBox!.y });
+    await page.getByTestId('sidebar-icon-assets').hover();
+    await expect(page.getByTestId('image-asset-library-panel')).toBeVisible({ timeout: 5000 });
+    const c1 = await page.locator('[data-testid^="image-asset-card-"]').count();
+    // Drop same again
+    await canvas.evaluate((el, { pngBytes, cx, cy }) => {
+      const file = new File([new Uint8Array(pngBytes)], 'canvas-dup.png', { type: 'image/png' });
+      const dt = new DataTransfer(); dt.items.add(file);
+      const ev = new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true, clientX: cx + 200, clientY: cy + 200 });
+      Object.defineProperty(ev, 'clientX', { value: cx + 200 }); Object.defineProperty(ev, 'clientY', { value: cy + 200 });
+      el.dispatchEvent(ev);
+    }, { pngBytes: MINI_PNG_BYTES, cx: canvasBox!.x, cy: canvasBox!.y });
+    await page.getByTestId('sidebar-icon-assets').hover();
+    await expect(page.getByTestId('image-asset-library-panel')).toBeVisible({ timeout: 5000 });
+    const c2 = await page.locator('[data-testid^="image-asset-card-"]').count();
+    expect(c2).toBe(c1);
+    // Two free nodes should exist (different ids)
+    const freeNodes = page.locator('[data-testid^="delete-free-ref-node-"]');
+    await expect(freeNodes.first()).toBeAttached({ timeout: 5000 });
+    expect(await freeNodes.count()).toBeGreaterThanOrEqual(2);
+    // Both nodes should have valid images (not broken)
+    const thumbs = page.locator('[data-testid^="reference-image-thumb-"]');
+    const thumbCount = await thumbs.count();
+    expect(thumbCount).toBeGreaterThanOrEqual(2);
+  });
+
+  test('10D3-dedup-04: drag same asset from library twice creates two free nodes with visible images', async ({ page }) => {
+    test.setTimeout(30000);
+    const canvas = page.getByTestId('production-canvas-view');
+    const canvasBox = await canvas.boundingBox();
+    expect(canvasBox).not.toBeNull();
+    // First, drop a file on canvas — this populates the mock image lib (ImageAsset)
+    await canvas.evaluate((el, { pngBytes, cx, cy }) => {
+      const file = new File([new Uint8Array(pngBytes)], 'libdrag.png', { type: 'image/png' });
+      const dt = new DataTransfer(); dt.items.add(file);
+      const ev = new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true, clientX: cx + 100, clientY: cy + 100 });
+      Object.defineProperty(ev, 'clientX', { value: cx + 100 }); Object.defineProperty(ev, 'clientY', { value: cy + 100 });
+      el.dispatchEvent(ev);
+    }, { pngBytes: MINI_PNG_BYTES, cx: canvasBox!.x, cy: canvasBox!.y });
+    // Now drag the image-asset card from library to canvas twice
+    await page.getByTestId('sidebar-icon-assets').hover();
+    await expect(page.getByTestId('image-asset-library-panel')).toBeVisible({ timeout: 5000 });
+    const imgCard = page.locator('[data-testid^="image-asset-card-"]').first();
+    await expect(imgCard).toBeVisible({ timeout: 5000 });
+    const cardId = (await imgCard.getAttribute('data-testid') || '').replace('image-asset-card-', '');
+    // Drag 1
+    await canvas.evaluate((el, { assetId, cx, cy }) => {
+      const dt = new DataTransfer();
+      dt.setData('application/workbench-image-asset', JSON.stringify({ assetId }));
+      const ev = new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true, clientX: cx + 300, clientY: cy + 300 });
+      Object.defineProperty(ev, 'clientX', { value: cx + 300 }); Object.defineProperty(ev, 'clientY', { value: cy + 300 });
+      el.dispatchEvent(ev);
+    }, { assetId: cardId, cx: canvasBox!.x, cy: canvasBox!.y });
+    // Drag 2
+    await canvas.evaluate((el, { assetId, cx, cy }) => {
+      const dt = new DataTransfer();
+      dt.setData('application/workbench-image-asset', JSON.stringify({ assetId }));
+      const ev = new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true, clientX: cx + 300, clientY: cy + 500 });
+      Object.defineProperty(ev, 'clientX', { value: cx + 300 }); Object.defineProperty(ev, 'clientY', { value: cy + 500 });
+      el.dispatchEvent(ev);
+    }, { assetId: cardId, cx: canvasBox!.x, cy: canvasBox!.y });
+    // Two free nodes
+    const freeNodes = page.locator('[data-testid^="delete-free-ref-node-"]');
+    await expect(freeNodes.first()).toBeAttached({ timeout: 8000 });
+    expect(await freeNodes.count()).toBeGreaterThanOrEqual(3); // 1 from initial drop + 2 from library drags
+    // Library count = 1 (only the original canvas drop)
+    await page.getByTestId('sidebar-icon-assets').hover();
+    await expect(page.getByTestId('image-asset-library-panel')).toBeVisible({ timeout: 5000 });
+    const libCount = await page.locator('[data-testid^="image-asset-card-"]').count();
+    expect(libCount).toBe(1);
+    // Free node images should load (thumbnails visible)
+    const thumbs = page.locator('[data-testid^="reference-image-thumb-"]');
+    expect(await thumbs.count()).toBeGreaterThanOrEqual(2);
+  });
+
+  test('10D3-dedup-03: different name same content adds new entry', async ({ page }) => {
+    test.setTimeout(30000);
+    const canvas = page.getByTestId('production-canvas-view');
+    const canvasBox = await canvas.boundingBox();
+    // Drop with name "diff-a.png"
+    await canvas.evaluate((el, { pngBytes, cx, cy }) => {
+      const file = new File([new Uint8Array(pngBytes)], 'diff-a.png', { type: 'image/png' });
+      const dt = new DataTransfer(); dt.items.add(file);
+      const ev = new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true, clientX: cx + 300, clientY: cy + 300 });
+      Object.defineProperty(ev, 'clientX', { value: cx + 300 }); Object.defineProperty(ev, 'clientY', { value: cy + 300 });
+      el.dispatchEvent(ev);
+    }, { pngBytes: MINI_PNG_BYTES, cx: canvasBox!.x, cy: canvasBox!.y });
+    await page.getByTestId('sidebar-icon-assets').hover();
+    await expect(page.getByTestId('image-asset-library-panel')).toBeVisible({ timeout: 5000 });
+    const c1 = await page.locator('[data-testid^="image-asset-card-"]').count();
+    // Drop again with different name "diff-b.png"
+    await canvas.evaluate((el, { pngBytes, cx, cy }) => {
+      const file = new File([new Uint8Array(pngBytes)], 'diff-b.png', { type: 'image/png' });
+      const dt = new DataTransfer(); dt.items.add(file);
+      const ev = new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true, clientX: cx + 400, clientY: cy + 400 });
+      Object.defineProperty(ev, 'clientX', { value: cx + 400 }); Object.defineProperty(ev, 'clientY', { value: cy + 400 });
+      el.dispatchEvent(ev);
+    }, { pngBytes: MINI_PNG_BYTES, cx: canvasBox!.x, cy: canvasBox!.y });
+    await page.getByTestId('sidebar-icon-assets').hover();
+    await expect(page.getByTestId('image-asset-library-panel')).toBeVisible({ timeout: 5000 });
+    const c2 = await page.locator('[data-testid^="image-asset-card-"]').count();
+    // Different name = new entry
+    expect(c2).toBe(c1 + 1);
+  });
 });

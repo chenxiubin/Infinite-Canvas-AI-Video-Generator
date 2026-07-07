@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import { Handle, Position } from '@xyflow/react';
 import { Upload, Image } from 'lucide-react';
 
 interface Props {
@@ -60,7 +61,10 @@ export const ReferenceImageNode: React.FC<Props> = ({ id, data }) => {
     data.onHoverStart?.(id);
   }, [id, data]);
 
-  const handleMouseLeave = useCallback(() => {
+  const handleMouseLeave = useCallback((e: React.MouseEvent) => {
+    // Don't fire leave if pointer just moved to a child element
+    const related = e.relatedTarget as HTMLElement | null;
+    if (related && e.currentTarget.contains(related)) return;
     setIsDragOver(false);
     setIsDragValid(false);
     data.onHoverEnd?.(id);
@@ -69,12 +73,11 @@ export const ReferenceImageNode: React.FC<Props> = ({ id, data }) => {
   return (
     <div
       data-testid={`reference-image-node-${sk}-${idx}`}
-      className={`bg-[#111827] border rounded-xl p-3 w-32 transition-colors cursor-pointer ${
-        hasImage && data.isHovered ? 'border-purple-500/40 shadow-[0_0_12px_rgba(168,85,247,0.15)]' :
-        hasImage ? 'border-white/10 hover:border-white/20' :
+      className={`bg-[#111827] border rounded-xl p-3 w-32 cursor-pointer group ${
+        hasImage ? 'border-white/10 hover:border-purple-500/40 hover:shadow-[0_0_12px_rgba(168,85,247,0.15)]' :
         isDragOver && isDragValid ? 'border-purple-400/60 shadow-[0_0_16px_rgba(168,85,247,0.2)]' :
         isDragOver && !isDragValid ? 'border-red-500/40' :
-        'border-dashed border-gray-700/50'
+        'border-dashed border-gray-700/50 hover:border-gray-500/50'
       }`}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
@@ -83,6 +86,7 @@ export const ReferenceImageNode: React.FC<Props> = ({ id, data }) => {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+      <Handle type="source" position={Position.Right} id="source" data-testid={`reference-source-handle-${id}`} style={{ background: '#8b5cf6', width: 10, height: 10, border: '2px solid #a78bfa' }} title="参考图输出" />
       <div
         data-testid={`reference-image-placeholder-${sk}-${idx}`}
         className={`aspect-[3/4] rounded-lg flex flex-col items-center justify-center gap-1 border border-white/5 relative overflow-hidden transition-colors ${
@@ -123,7 +127,7 @@ export const ReferenceImageNode: React.FC<Props> = ({ id, data }) => {
         <button
           data-testid={`delete-free-ref-node-${id}`}
           onClick={(e) => { e.stopPropagation(); data.onDeleteFreeNode?.(); }}
-          className="mt-1 w-full text-[8px] text-red-500 hover:text-red-300 hover:bg-red-900/20 rounded py-0.5 transition-colors"
+          className="nodrag mt-1 w-full text-[8px] text-red-500 hover:text-red-300 hover:bg-red-900/20 rounded py-0.5 transition-colors"
         >
           删除
         </button>

@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import {
   ReactFlow, ReactFlowProvider, Background, Controls, useReactFlow, useOnViewportChange,
-  Handle, Position, addEdge, useEdgesState, useNodesState, BaseEdge, EdgeLabelRenderer, getBezierPath,
+  Handle, Position, addEdge, useNodesState, useEdgesState, BaseEdge, EdgeLabelRenderer, getBezierPath,
   type Node as RFNode, type Edge, type NodeTypes, type EdgeTypes, type Connection, type OnEdgesChange,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -40,7 +40,6 @@ interface Props {
   generatingShotKeys?: string[];
   productLine?: 'desk_calendar' | 'wall_calendar';
   // Reference image node interactions (10D-1 / 10D-2)
-  hoveredRefNodeId?: string | null;
   onHoverRefNode?: (nodeId: string | null) => void;
   onDropImageToRefNode?: (nodeId: string, file: File) => void;
   onDropImageToCanvas?: (file: File, canvasPos: { x: number; y: number }) => void;
@@ -48,6 +47,15 @@ interface Props {
   freeRefNodes?: { id: string; imageAssetId: string; position: { x: number; y: number } }[];
   imageAssets?: { id: string; name: string; url: string; mimeType: string; createdAt: number; source: string }[];
   onDeleteFreeRefNode?: (nodeId: string) => void;
+  // 10D-3: Track canvas mouse position for paste placement
+  onCanvasMouseMove?: (pos: { x: number; y: number }) => void;
+  // Manual connection support
+  manualEdges?: any[];
+  onManualEdgeCreate?: (edge: any) => void;
+  // Create free node from library ImageAsset by assetId
+  onCreateFreeFromLibraryAsset?: (assetId: string, position: { x: number; y: number }) => void;
+  // Legacy: create free node from workbench asset
+  onManualFreeNodeFromAsset?: (freeId: string, asset: WorkbenchAsset, position: { x: number; y: number }) => void;
 }
 
 const DEFAULT_SHOTS = [
@@ -102,27 +110,6 @@ const WorkbenchShotNode: React.FC<{ id: string; data: { item: any; onSelect?: (n
   );
 };
 
-// ==== Custom Node: Asset Node with source Handle ====
-const WorkbenchAssetNode: React.FC<{ id: string; data: { asset: WorkbenchAsset; connectingAssetId?: string | null; onStartConnecting?: (id: string) => void; } }> = ({ id, data }) => {
-  const a = data.asset; const isConnecting = data.connectingAssetId === a.id;
-  return (
-    <div data-testid={`canvas-asset-node-${a.id}`} className={`bg-[#111827] border rounded-xl p-3 w-36 ${isConnecting ? 'border-purple-500 shadow-lg shadow-purple-500/20' : 'border-white/10'}`}>
-      <Handle type="source" position={Position.Right} id="asset-source" data-testid={`asset-node-source-handle-${a.id}`} style={{ background: '#a855f7', width: 10, height: 10 }} title="连线到分镜" />
-      <img src={a.url} data-testid={`canvas-asset-node-thumbnail-${a.id}`} className="w-full h-20 object-cover rounded-lg mb-2 border border-white/5" />
-      <div className="text-[10px] text-gray-300 truncate">{a.filename}</div>
-      <div className="text-[8px] text-purple-400 mt-0.5">{a.role}</div>
-      {isConnecting ? (
-        <div className="text-[9px] text-purple-300 text-center mt-1 animate-pulse">连接中...</div>
-      ) : (
-        <button data-testid={`asset-node-connect-${a.id}`} onClick={(e) => { e.stopPropagation(); data.onStartConnecting?.(a.id); }}
-          className="w-full mt-1.5 text-[9px] bg-purple-600/30 hover:bg-purple-600/50 text-purple-300 rounded py-0.5 border border-purple-500/20 transition-colors">
-          连接
-        </button>
-      )}
-    </div>
-  );
-};
-
 // ==== Custom Edge: MaterialEdge with color/label by binding_type ====
 const MaterialEdge: React.FC<{ id: string; sourceX: number; sourceY: number; targetX: number; targetY: number; sourcePosition: any; targetPosition: any; data?: { bindingType?: string; label?: string; onDelete?: (edgeId: string) => void } }> =
   ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data }) => {
@@ -137,7 +124,7 @@ const MaterialEdge: React.FC<{ id: string; sourceX: number; sourceY: number; tar
   };
 
 const edgeTypes: EdgeTypes = { materialEdge: MaterialEdge };
-const shotNodeTypes: NodeTypes = { workbenchShot: WorkbenchShotNode, workbenchAsset: WorkbenchAssetNode, workbenchVideoPreview: VideoPreviewNode, referenceImageNode: ReferenceImageNode, shotControlNode: ShotControlNode, fixedVideoResultNode: FixedVideoResultNode, mergeNode: MergeNode };
+const shotNodeTypes: NodeTypes = { workbenchShot: WorkbenchShotNode, workbenchVideoPreview: VideoPreviewNode, referenceImageNode: ReferenceImageNode, shotControlNode: ShotControlNode, fixedVideoResultNode: FixedVideoResultNode, mergeNode: MergeNode };
 
 // ==== Toolbar inside ReactFlow ====
 const CanvasToolbar: React.FC<{ instance: any; noData: boolean; connectingAssetId?: string | null; onCancelConnecting?: () => void }> = ({ instance, noData, connectingAssetId, onCancelConnecting }) => {
@@ -156,13 +143,10 @@ const CanvasToolbar: React.FC<{ instance: any; noData: boolean; connectingAssetI
   </div>);
 };
 
-export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefresh, onSelectNode, assets, shotBindings, onConnectBinding, onDeleteBinding, connectingAssetId, onStartConnecting, onCancelConnecting, onRegenerateShot, onGenerateSingleShot, generatingShotKeys, productLine, hoveredRefNodeId, onHoverRefNode, onDropImageToRefNode, onDropImageToCanvas, refImageUrls, freeRefNodes, imageAssets, onDeleteFreeRefNode }) => {
+export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefresh, onSelectNode, assets, shotBindings, onConnectBinding, onDeleteBinding, connectingAssetId, onStartConnecting, onCancelConnecting, onRegenerateShot, onGenerateSingleShot, generatingShotKeys, productLine, onHoverRefNode, onDropImageToRefNode, onDropImageToCanvas, refImageUrls, freeRefNodes, imageAssets, onDeleteFreeRefNode, onCanvasMouseMove, manualEdges, onManualEdgeCreate, onCreateFreeFromLibraryAsset, onManualFreeNodeFromAsset }) => {
   const noData = !instance || nodes.length === 0;
 
   // Shot data is sourced from the nodes/shotBindings props; visual nodes are produced by produceFixedLayout below.
-
-  // Build asset nodes
-  const assetNodes: RFNode[] = useMemo(() => (assets || []).map((a, i) => ({ id: `asset-${a.id}`, type: 'workbenchAsset', position: { x: 20, y: 920 + i * 130 }, data: { asset: a, connectingAssetId, onStartConnecting }, draggable: true })), [assets, connectingAssetId, onStartConnecting]);
 
   const handleEdgeDelete = useCallback((edgeId: string) => {
     if (edgeId.startsWith('be-sf-')) { const sk = edgeId.replace('be-sf-', ''); onDeleteBinding?.(sk, 'startFrame'); }
@@ -232,7 +216,7 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
           n.data = {
             ...n.data,
             imageUrl: (refImageUrls || {})[n.id] || undefined,
-            isHovered: hoveredRefNodeId === n.id,
+            // Hover tracked via CSS :hover + ref callback; NOT in node data to avoid rebuilds
             onHoverStart: (nodeId: string) => onHoverRefNode?.(nodeId),
             onHoverEnd: () => onHoverRefNode?.(null),
             onDropImage: (nodeId: string, file: File) => onDropImageToRefNode?.(nodeId, file),
@@ -242,7 +226,7 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
       }),
       edges: raw.edges,
     };
-  }, [productLine, nodes, shotBindings, onSelectNode, onGenerateSingleShot, generatingShotKeys, connectingAssetId, onConnectBinding, hoveredRefNodeId, onHoverRefNode, onDropImageToRefNode, refImageUrls]);
+  }, [productLine, nodes, shotBindings, onSelectNode, onGenerateSingleShot, generatingShotKeys, connectingAssetId, onConnectBinding, onDropImageToRefNode, refImageUrls]);
 
   // 10D-2: Build free reference nodes (dropped on canvas blank area)
   const freeRefNodesRf: RFNode[] = useMemo(() => (freeRefNodes || []).map(frn => {
@@ -256,7 +240,6 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
         role_label: imgAsset?.name || '未命名',
         product_line: productLine || 'desk_calendar',
         imageUrl: imgAsset?.url,
-        isHovered: hoveredRefNodeId === frn.id,
         isFreeNode: true,
         freeNodeId: frn.id,
         onHoverStart: (nodeId: string) => onHoverRefNode?.(nodeId),
@@ -266,29 +249,70 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
       },
       draggable: true,
     };
-  }), [freeRefNodes, imageAssets, productLine, hoveredRefNodeId, onHoverRefNode, onDropImageToRefNode, onDeleteFreeRefNode]);
+  }), [freeRefNodes, imageAssets, productLine, onHoverRefNode, onDropImageToRefNode, onDeleteFreeRefNode]);
 
-  const allNodes = useMemo(() => [...fixedLayout.nodes, ...assetNodes, ...videoPreviewNodes, ...freeRefNodesRf], [fixedLayout.nodes, assetNodes, videoPreviewNodes, freeRefNodesRf]);
-  const allEdges = useMemo(() => [...fixedLayout.edges, ...bindingEdges, ...videoPreviewEdges], [fixedLayout.edges, bindingEdges, videoPreviewEdges]);
+  const allNodes = useMemo(() => [...fixedLayout.nodes, ...videoPreviewNodes, ...freeRefNodesRf], [fixedLayout.nodes, videoPreviewNodes, freeRefNodesRf]);
+  const allEdges = useMemo(() => [...fixedLayout.edges, ...bindingEdges, ...videoPreviewEdges, ...(manualEdges || [])], [fixedLayout.edges, bindingEdges, videoPreviewEdges, manualEdges]);
 
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState(allNodes);
-  const [rfEdges, setRfEdges, onEdgesChangeLocal] = useEdgesState(allEdges);
 
-  // Sync external state into ReactFlow state
-  React.useEffect(() => { setRfNodes(allNodes); }, [allNodes, setRfNodes]);
+  // Sync external state into ReactFlow state, preserving dragged positions
+  React.useEffect(() => {
+    setRfNodes(prev => {
+      const prevMap = new Map(prev.map(n => [n.id, n]));
+      return allNodes.map(n => {
+        const existing = prevMap.get(n.id);
+        if (existing) return { ...n, position: existing.position };
+        return n;
+      });
+    });
+  }, [allNodes, setRfNodes]);
+
+  // Edges: useEdgesState with allEdges as direct initial value
+  const [rfEdgesState, setRfEdges, onEdgesChangeLocal] = useEdgesState(allEdges);
   React.useEffect(() => { setRfEdges(allEdges); }, [allEdges, setRfEdges]);
+
+  const onEdgesChangeWrapper: OnEdgesChange = useCallback((changes) => {
+    onEdgesChangeLocal(changes);
+  }, [onEdgesChangeLocal]);
 
   const onConnect = useCallback((connection: Connection) => {
     if (!connection.target || !connection.source || !connection.targetHandle) return;
-    if (!connection.targetHandle.match(/^(start_frame|end_frame|reference_image)$/)) return;
-    if (!connection.source.startsWith('asset-')) return;
-    const targetShotKey = connection.target.startsWith('shot-control-node-') ? connection.target.replace('shot-control-node-', '') : connection.target;
-    const assetId = connection.source.replace('asset-', '');
-    const bindingType = connection.targetHandle; // 'start_frame'|'end_frame'|'reference_image'
-    // Map handle id to frameType: 'start_frame'→'startFrame', 'end_frame'→'endFrame', 'reference_image'→'reference'
-    const frameType = bindingType === 'start_frame' ? 'startFrame' : bindingType === 'end_frame' ? 'endFrame' : 'reference';
-    onConnectBinding?.(targetShotKey, frameType, assetId);
-  }, [onConnectBinding]);
+
+    // Path 1: Existing asset-binding handles (start_frame, end_frame, reference_image)
+    if (connection.targetHandle.match(/^(start_frame|end_frame|reference_image)$/)) {
+      if (!connection.source.startsWith('asset-')) return;
+      const targetShotKey = connection.target.startsWith('shot-control-node-') ? connection.target.replace('shot-control-node-', '') : connection.target;
+      const assetId = connection.source.replace('asset-', '');
+      const bindingType = connection.targetHandle;
+      const frameType = bindingType === 'start_frame' ? 'startFrame' : bindingType === 'end_frame' ? 'endFrame' : 'reference';
+      onConnectBinding?.(targetShotKey, frameType, assetId);
+      return;
+    }
+
+    // Path 2: Manual ReferenceImageNode → ShotControlNode connection
+    if (connection.sourceHandle === 'source' && connection.targetHandle === 'target') {
+      const sourceIsRef = connection.source.startsWith('ref-node-') || connection.source.startsWith('free-ref-');
+      const targetIsShot = connection.target.startsWith('shot-control-node-');
+      if (!sourceIsRef || !targetIsShot) return;
+
+      const edgeId = `manual-edge-${connection.source}-${connection.target}`;
+      // Check for duplicates
+      const exists = (manualEdges || []).some(e => e.id === edgeId);
+      if (exists) return;
+
+      onManualEdgeCreate?.({
+        id: edgeId,
+        source: connection.source,
+        target: connection.target,
+        sourceHandle: 'source',
+        targetHandle: 'target',
+        type: 'default',
+        style: { stroke: '#8b5cf6', strokeWidth: 1.8 },
+      });
+      return;
+    }
+  }, [onConnectBinding, manualEdges, onManualEdgeCreate]);
 
   const onDrop = useCallback((event: React.DragEvent) => {
     event.preventDefault();
@@ -302,24 +326,39 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
       imageFiles.forEach(f => onDropImageToCanvas?.(f, canvasPos));
       return;
     }
-    // Existing: handle workbench asset drops
+    // Handle library image-asset drags — create free ReferenceImageNode by assetId
+    try {
+      const libRaw = event.dataTransfer.getData('application/workbench-image-asset');
+      if (libRaw) {
+        const { assetId } = JSON.parse(libRaw);
+        const canvasRect = event.currentTarget.getBoundingClientRect();
+        const pos = { x: event.clientX - canvasRect.left, y: event.clientY - canvasRect.top };
+        onCreateFreeFromLibraryAsset?.(assetId, pos);
+        return;
+      }
+    } catch {}
+    // Legacy: handle old-style workbench asset drops (asset card format)
     try {
       const raw = event.dataTransfer.getData('application/workbench-asset');
       if (!raw) return;
-      const asset = JSON.parse(raw) as WorkbenchAsset;
-      const pos = { x: event.clientX - 350, y: event.clientY - 150 };
-      setRfNodes(nds => {
-        if (nds.find(n => n.id === `asset-${asset.id}`)) return nds;
-        return [...nds, { id: `asset-${asset.id}`, type: 'workbenchAsset', position: pos, data: { asset }, draggable: true }];
-      });
+      const data = JSON.parse(raw);
+      // If the legacy data has _assetId, use it for assetId-based creation
+      if (data._assetId) {
+        const canvasRect = event.currentTarget.getBoundingClientRect();
+        const pos = { x: event.clientX - canvasRect.left, y: event.clientY - canvasRect.top };
+        onCreateFreeFromLibraryAsset?.(data._assetId, pos);
+        return;
+      }
+      // Otherwise try the old workbench asset path (filename + url)
+      const asset = data as WorkbenchAsset;
+      const canvasRect = event.currentTarget.getBoundingClientRect();
+      const pos = { x: event.clientX - canvasRect.left, y: event.clientY - canvasRect.top };
+      const freeId = `free-ref-${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      onManualFreeNodeFromAsset?.(freeId, asset, pos);
     } catch {}
   }, [setRfNodes, onDropImageToCanvas]);
 
   const onDragOver = useCallback((event: React.DragEvent) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; }, []);
-
-  const onEdgesChangeWrapper: OnEdgesChange = useCallback((changes) => {
-    onEdgesChangeLocal(changes);
-  }, [onEdgesChangeLocal]);
 
   // React Flow onNodeClick — the proper API for canvas node clicks.
   const handleNodeClick = useCallback((_event: React.MouseEvent, rfNode: any) => {
@@ -347,11 +386,15 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
   }, [nodes, onSelectNode, imageAssets]);
 
   return (
-    <div data-testid="production-canvas-view" className="h-full flex flex-col bg-[#0a0f1a] overflow-hidden" onDragOver={onDragOver} onDrop={onDrop}>
+    <div data-testid="production-canvas-view" className="h-full flex flex-col bg-[#0a0f1a] overflow-hidden" onDragOver={onDragOver} onDrop={onDrop}
+      onMouseMove={(e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        onCanvasMouseMove?.({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+      }}>
       <ReactFlowProvider>
         <div className="flex-1 min-h-0 relative">
           {noData && (<div data-testid="canvas-empty-hint" className="absolute top-2 left-2 flex items-center gap-1.5 z-10"><Package className="w-3 h-3 text-gray-600" /><span className="text-[10px] text-gray-600">请先创建 video batch</span></div>)}
-          <ReactFlow nodes={rfNodes} edges={rfEdges} nodeTypes={shotNodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChangeWrapper} onConnect={onConnect} onNodeClick={handleNodeClick} fitView fitViewOptions={{ padding: 0.15, duration: 0 }} minZoom={0.3} maxZoom={2} nodesDraggable={true} nodesConnectable={true} elementsSelectable={true} proOptions={{ hideAttribution: true }}>
+          <ReactFlow nodes={rfNodes} edges={rfEdgesState} nodeTypes={shotNodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChangeWrapper} onConnect={onConnect} onNodeClick={handleNodeClick} fitView fitViewOptions={{ padding: 0.15, duration: 0 }} minZoom={0.3} maxZoom={2} nodesDraggable={true} nodesConnectable={true} elementsSelectable={true} proOptions={{ hideAttribution: true }}>
             <Background color="#1f2937" gap={16} size={1} />
             <Controls position="bottom-right" showInteractive={false} />
             <CanvasToolbar instance={instance} noData={noData} connectingAssetId={connectingAssetId} onCancelConnecting={onCancelConnecting} />

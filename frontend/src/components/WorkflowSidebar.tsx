@@ -215,8 +215,11 @@ export const WorkflowSidebar: React.FC<Props> = (p) => {
             {(p.imageAssets || []).map(a => (
               <div key={a.id} data-testid={`image-asset-card-${a.id}`} draggable
                 onDragStart={e => {
+                  // Primary: assetId-based drag for library → free ReferenceImageNode
+                  e.dataTransfer.setData('application/workbench-image-asset', JSON.stringify({ assetId: a.id }));
+                  // Legacy: also set workbench-asset for backward compat with asset card drops
                   e.dataTransfer.setData('application/workbench-asset', JSON.stringify({
-                    id: a.id, filename: a.name, url: a.url, role: 'reference', createdAt: a.createdAt
+                    id: a.id, filename: a.name, url: a.url, role: 'reference', createdAt: a.createdAt, _assetId: a.id
                   }));
                   e.dataTransfer.effectAllowed = 'move';
                 }}

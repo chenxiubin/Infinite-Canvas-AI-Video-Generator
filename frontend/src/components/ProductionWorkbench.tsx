@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as api from '../api/mvp3';
+
+const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 import { type StoryboardPromptConfig, getDefaultStoryboardConfig, buildFinalPrompt } from '../lib/storyboardPrompt';
 import { WorkbenchHeader } from './WorkbenchHeader';
 import { WorkflowSidebar } from './WorkflowSidebar';
@@ -15,7 +17,7 @@ interface WorkbenchAsset { id: string; filename: string; url: string; role: stri
 interface ShotFrameBinding { shotKey: string; startFrameAssetId?: string; startFrameBindingId?: string; endFrameAssetId?: string; endFrameBindingId?: string; referenceAssetIds?: string[]; referenceBindingIds?: string[]; }
 
 // 10D-2: Mock image asset — kept in a front-end-only library, separate from WorkbenchAsset
-interface ImageAsset { id: string; name: string; url: string; mimeType: string; createdAt: number; source: 'drop-canvas' | 'drop-reference-node'; }
+interface ImageAsset { id: string; name: string; url: string; mimeType: string; createdAt: number; source: string; fileName: string; size: number; contentHash: string; }
 
 // 10D-2: Free-standing reference image node (not part of fixed layout)
 interface FreeRefNode { id: string; imageAssetId: string; position: { x: number; y: number }; }
@@ -38,12 +40,15 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
   const [motionShotVersion, setMotionShotVersion] = useState<'primary' | 'backup'>('primary');
 	const [productLine, setProductLine] = useState<'desk_calendar' | 'wall_calendar'>('desk_calendar');
 	const [generatingShotKeys, setGeneratingShotKeys] = useState<string[]>([]);
-	// 10D-1: Reference image node interactions
-	const [hoveredRefNodeId, setHoveredRefNodeId] = useState<string | null>(null);
+	// 10D-1: Reference image node interactions — hover target via ref (no re-render)
+	const hoveredRefNodeIdRef = useRef<string | null>(null);
+	const setHoveredRefNodeId = useCallback((id: string | null) => { hoveredRefNodeIdRef.current = id; }, []);
 	const [refImageUrls, setRefImageUrls] = useState<Record<string, string>>({});
 	// 10D-2: Mock image asset library + free reference nodes
 	const [imageAssets, setImageAssets] = useState<ImageAsset[]>([]);
 	const [freeRefNodes, setFreeRefNodes] = useState<FreeRefNode[]>([]);
+	// Manual edges created by user dragging between handles (separate from fixed layout edges)
+	const [manualEdges, setManualEdges] = useState<any[]>([]);
 
   const batchIdRef = useRef(''); const instanceRef = useRef<InstanceData | null>(null);
   useEffect(() => { batchIdRef.current = batchId; }, [batchId]);
@@ -196,43 +201,134 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
   const canExport = instance?.review_status==='approved';
   const isReady = checklist?.is_ready;
 
-  // 10D-2: Reference image drop handler — adds to image library + replaces node image
-  const handleDropImageToRefNode = useCallback((nodeId: string, file: File) => {
+  // 10D-3: Unified dedup helper — returns { asset, isNew }
+  const imageAssetsRef = useRef(imageAssets);
+  imageAssetsRef.current = imageAssets;
+
+  const addImageAssetFromFile = useCallback(async (file: File, source: string): Promise<{ asset: ImageAsset; isNew: boolean }> => {
     const blobUrl = URL.createObjectURL(file);
+    const arrayBuffer = await file.arrayBuffer();
+    const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+    const contentHash = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+    const fileName = file.name || `paste-${Date.now()}.png`;
+
+    // Check existing: same fileName + same contentHash = duplicate
+    const existing = imageAssetsRef.current.find(a => a.fileName === fileName && a.contentHash === contentHash);
+    if (existing) {
+      URL.revokeObjectURL(blobUrl);
+      return { asset: existing, isNew: false };
+    }
+
     const imgAsset: ImageAsset = {
       id: `img_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       name: file.name || '未命名图片',
       url: blobUrl,
       mimeType: file.type,
       createdAt: Date.now(),
-      source: 'drop-reference-node',
+      source,
+      fileName,
+      size: file.size,
+      contentHash,
     };
     setImageAssets(prev => [...prev, imgAsset]);
-    setRefImageUrls(prev => {
-      if (prev[nodeId]?.startsWith('blob:')) URL.revokeObjectURL(prev[nodeId]);
-      return { ...prev, [nodeId]: blobUrl };
-    });
+    return { asset: imgAsset, isNew: true };
   }, []);
 
+  // 10D-2: Reference image drop handler — adds to library + replaces node image
+  const handleDropImageToRefNode = useCallback(async (nodeId: string, file: File) => {
+    const { asset } = await addImageAssetFromFile(file, 'drop-reference-node');
+    setRefImageUrls(prev => {
+      if (prev[nodeId]?.startsWith('blob:')) URL.revokeObjectURL(prev[nodeId]);
+      return { ...prev, [nodeId]: asset.url };
+    });
+  }, [addImageAssetFromFile]);
+
   // 10D-2: Canvas blank area image drop — adds to library + creates free ReferenceImageNode
-  const handleDropImageToCanvas = useCallback((file: File, canvasPos: { x: number; y: number }) => {
-    const blobUrl = URL.createObjectURL(file);
-    const imgAsset: ImageAsset = {
-      id: `img_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      name: file.name || '未命名图片',
-      url: blobUrl,
-      mimeType: file.type,
-      createdAt: Date.now(),
-      source: 'drop-canvas',
-    };
-    setImageAssets(prev => [...prev, imgAsset]);
+  const handleDropImageToCanvas = useCallback(async (file: File, canvasPos: { x: number; y: number }) => {
+    const { asset } = await addImageAssetFromFile(file, 'drop-canvas');
     const freeId = `free-ref-${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    setFreeRefNodes(prev => [...prev, { id: freeId, imageAssetId: imgAsset.id, position: canvasPos }]);
-  }, []);
+    setFreeRefNodes(prev => [...prev, { id: freeId, imageAssetId: asset.id, position: canvasPos }]);
+  }, [addImageAssetFromFile]);
 
   // 10D-2: Delete free reference node (does NOT delete the image from library)
   const handleDeleteFreeRefNode = useCallback((nodeId: string) => {
     setFreeRefNodes(prev => prev.filter(n => n.id !== nodeId));
+  }, []);
+
+  // Create free node from library ImageAsset by assetId.
+  // Looks up existing ImageAsset directly — no URL matching, no new entries.
+  const handleCreateFreeFromLibraryAsset = useCallback((assetId: string, position: { x: number; y: number }) => {
+    const existing = imageAssetsRef.current.find(a => a.id === assetId);
+    if (!existing) {
+      console.warn('[10D-3] Library asset not found:', assetId);
+      return;
+    }
+    const freeId = `free-ref-${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    setFreeRefNodes(prev => [...prev, { id: freeId, imageAssetId: assetId, position }]);
+  }, []);
+
+  // Legacy fallback for old drag format (should rarely be used now)
+  const handleManualFreeNodeFromAsset = useCallback((freeId: string, asset: WorkbenchAsset, position: { x: number; y: number }) => {
+    // Try to find by _assetId or id first, then fall back to URL
+    let existing = imageAssetsRef.current.find(a => a.id === (asset as any)._assetId || a.id === asset.id);
+    if (!existing) {
+      existing = imageAssetsRef.current.find(a => a.url === asset.url);
+    }
+    if (!existing) {
+      const imgId = `img_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      existing = { id: imgId, name: asset.filename, url: asset.url, mimeType: 'image/png', createdAt: Date.now(), source: 'drop-canvas', fileName: asset.filename, size: 0, contentHash: '' };
+      setImageAssets(prev => [...prev, existing!]);
+    }
+    setFreeRefNodes(prev => [...prev, { id: freeId, imageAssetId: existing!.id, position }]);
+  }, []);
+
+  // 10D-3: Track last canvas mouse position for paste positioning
+  const canvasMousePosRef = useRef<{ x: number; y: number }>({ x: 200, y: 200 });
+  const handleCanvasMouseMove = useCallback((pos: { x: number; y: number }) => {
+    canvasMousePosRef.current = pos;
+  }, []);
+
+  // 10D-3: Create an image asset from a File, optionally targeting a hovered ref node
+  const addImageFromFile = useCallback(async (file: File, targetNodeId?: string) => {
+    const source = targetNodeId ? 'paste-reference-node' : 'paste-canvas';
+    const { asset } = await addImageAssetFromFile(file, source);
+    if (targetNodeId) {
+      setRefImageUrls(prev => {
+        if (prev[targetNodeId]?.startsWith('blob:')) URL.revokeObjectURL(prev[targetNodeId]);
+        return { ...prev, [targetNodeId]: asset.url };
+      });
+    } else {
+      const freeId = `free-ref-${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      setFreeRefNodes(prev => [...prev, { id: freeId, imageAssetId: asset.id, position: canvasMousePosRef.current }]);
+    }
+  }, [addImageAssetFromFile]);
+
+  // 10D-3: Ctrl+V paste handler — paste images to hovered ref node or canvas
+  const pasteHandlerRef = useRef<(e: ClipboardEvent) => void>(() => {});
+  pasteHandlerRef.current = (e: ClipboardEvent) => {
+    const target = e.target as HTMLElement;
+    // Don't intercept paste in input/textarea/contenteditable
+    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || (target as any).isContentEditable)) {
+      // Only handle if it contains image data AND no text
+      const items = Array.from(e.clipboardData?.items || []);
+      const hasText = items.some(i => i.type === 'text/plain' || i.type === 'text/html');
+      if (hasText) return; // let normal text paste through
+    }
+    const items = Array.from(e.clipboardData?.items || []);
+    const imgItem = items.find(i => ACCEPTED_IMAGE_TYPES.includes(i.type));
+    if (imgItem) {
+      e.preventDefault();
+      const file = imgItem.getAsFile();
+      if (file) {
+        addImageFromFile(file, hoveredRefNodeIdRef.current || undefined).catch(() => {});
+      }
+    }
+  };
+
+  useEffect(() => {
+    const handler = (e: ClipboardEvent) => pasteHandlerRef.current(e);
+    document.addEventListener('paste', handler);
+    return () => document.removeEventListener('paste', handler);
   }, []);
 
   // Revoke blob URLs on unmount
@@ -293,7 +389,6 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
             connectingAssetId={connectingAssetId}
             onStartConnecting={setConnectingAssetId}
             onCancelConnecting={() => setConnectingAssetId(null)}
-            hoveredRefNodeId={hoveredRefNodeId}
             onHoverRefNode={setHoveredRefNodeId}
             onDropImageToRefNode={handleDropImageToRefNode}
             onDropImageToCanvas={handleDropImageToCanvas}
@@ -301,6 +396,11 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
             freeRefNodes={freeRefNodes}
             imageAssets={imageAssets}
             onDeleteFreeRefNode={handleDeleteFreeRefNode}
+            onCanvasMouseMove={handleCanvasMouseMove}
+            manualEdges={manualEdges}
+            onManualEdgeCreate={(edge: any) => setManualEdges(prev => [...prev, edge])}
+            onCreateFreeFromLibraryAsset={handleCreateFreeFromLibraryAsset}
+            onManualFreeNodeFromAsset={handleManualFreeNodeFromAsset}
           />
         </main>
 

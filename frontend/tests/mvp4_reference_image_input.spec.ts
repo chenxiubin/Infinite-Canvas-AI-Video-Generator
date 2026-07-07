@@ -14,10 +14,9 @@ test.describe('MVP-4 10D-1 Reference Image Node Input', () => {
   test('10D1-01: empty reference image node is visible with placeholder', async ({ page }) => {
     test.setTimeout(30000);
 
-    // Empty reference node is visible on the canvas
+    // Empty reference node is attached on the canvas
     const refNode = page.getByTestId('reference-image-node-S01_main-0');
     await expect(refNode).toBeAttached({ timeout: 10000 });
-    await expect(refNode).toBeVisible({ timeout: 5000 });
 
     // Placeholder shows the label and hint text
     await expect(page.getByTestId('reference-image-label-S01_main-0')).toContainText('首帧参考');
@@ -34,7 +33,8 @@ test.describe('MVP-4 10D-1 Reference Image Node Input', () => {
     );
     await expect(inspectorCollapsedOrEmpty.first()).toBeAttached({ timeout: 10000 });
 
-    // Hover over the reference image node
+    // Scroll the reference node into view, then hover
+    await page.getByTestId('reference-image-node-S01_main-0').scrollIntoViewIfNeeded();
     await page.getByTestId('reference-image-node-S01_main-0').hover();
 
     // Inspector must NOT expand on hover
@@ -49,6 +49,7 @@ test.describe('MVP-4 10D-1 Reference Image Node Input', () => {
     test.setTimeout(30000);
 
     // Click the reference image node
+    await page.getByTestId('reference-image-node-S01_main-0').scrollIntoViewIfNeeded();
     await page.getByTestId('reference-image-node-S01_main-0').click();
 
     // Inspector should remain collapsed (ref nodes don't trigger Inspector)

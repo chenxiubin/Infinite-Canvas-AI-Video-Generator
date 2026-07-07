@@ -1,4 +1,5 @@
 import React from 'react';
+import { Handle, Position } from '@xyflow/react';
 
 interface Props {
   id: string;
@@ -9,6 +10,8 @@ export const FixedVideoResultNode: React.FC<Props> = ({ data }) => {
   const sk = data.shot_key;
   return (
     <div data-testid={`fixed-video-node-${sk}`} className="bg-[#111827] border border-white/10 rounded-xl p-3 w-36 relative">
+      <Handle type="target" position={Position.Top} id="target" data-testid={`video-target-handle-${sk}`} style={{ background: '#3b82f6', width: 10, height: 10, border: '2px solid #60a5fa' }} title="视频输入" />
+      <Handle type="source" position={Position.Bottom} id="source" data-testid={`video-source-handle-${sk}`} style={{ background: '#3b82f6', width: 10, height: 10, border: '2px solid #60a5fa' }} title="合成输出" />
       {/* Film-strip dots on left edge */}
       <div className="absolute left-1 top-2 bottom-2 flex flex-col gap-1.5">
         <div className="w-1 h-1 rounded-full bg-gray-700" />

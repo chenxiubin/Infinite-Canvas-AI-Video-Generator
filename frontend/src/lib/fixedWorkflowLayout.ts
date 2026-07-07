@@ -1,4 +1,4 @@
-import type { Node, Edge } from 'reactflow';
+import type { Node, Edge } from '@xyflow/react';
 
 const SHOT_KEYS = ['S01_main','S02_detail1','S03_detail2','S04_motion','S05_scene','S06_brand'];
 const NAMES: Record<string,string> = {S01_main:'主图-正面',S02_detail1:'细节特写-材质',S03_detail2:'细节特写-结构',S04_motion:'运镜展示',S05_scene:'场景陈列',S06_brand:'收尾呼应'};
@@ -29,9 +29,9 @@ export function produceFixedLayout(productLine: string) {
         id: `ref-node-${sk}-${ri}`, type: 'referenceImageNode',
         position: { x: rx, y: REF_Y },
         data: { shot_key: sk, shot_name: NAMES[sk] || sk, ref_index: ri, role_label: label, product_line: pl },
-        draggable: false,
+        draggable: true,
       });
-      edges.push({ id: `ref-edge-${sk}-${ri}`, source: `ref-node-${sk}-${ri}`, target: `shot-control-node-${sk}`, type: 'default', style: { stroke: '#374151', strokeWidth: 1, strokeDasharray: '4,2' } });
+      edges.push({ id: `ref-edge-${sk}-${ri}`, source: `ref-node-${sk}-${ri}`, target: `shot-control-node-${sk}`, sourceHandle: 'source', type: 'default' as const, style: { stroke: '#6366f1', strokeWidth: 2 } });
     }
 
     // Shot control node (middle)
@@ -39,7 +39,7 @@ export function produceFixedLayout(productLine: string) {
       id: `shot-control-node-${sk}`, type: 'shotControlNode',
       position: { x: cx, y: SHOT_Y },
       data: { shot_key: sk, shot_name: NAMES[sk] || sk, product_line: pl },
-      draggable: false,
+      draggable: true,
     });
 
     // Fixed video result node (below shot)
@@ -47,12 +47,12 @@ export function produceFixedLayout(productLine: string) {
       id: `fixed-video-node-${sk}`, type: 'fixedVideoResultNode',
       position: { x: cx, y: VIDEO_Y },
       data: { shot_key: sk, shot_name: NAMES[sk] || sk, product_line: pl },
-      draggable: false,
+      draggable: true,
     });
-    edges.push({ id: `shot-video-edge-${sk}`, source: `shot-control-node-${sk}`, target: `fixed-video-node-${sk}`, type: 'default', style: { stroke: '#374151', strokeWidth: 1, strokeDasharray: '4,2' } });
+    edges.push({ id: `shot-video-edge-${sk}`, source: `shot-control-node-${sk}`, target: `fixed-video-node-${sk}`, sourceHandle: 'source', targetHandle: 'target', type: 'default', style: { stroke: '#6366f1', strokeWidth: 2 } });
 
     // Video → merge edge
-    edges.push({ id: `video-merge-edge-${sk}`, source: `fixed-video-node-${sk}`, target: 'merge-node', type: 'default', style: { stroke: '#374151', strokeWidth: 1, strokeDasharray: '4,2' } });
+    edges.push({ id: `video-merge-edge-${sk}`, source: `fixed-video-node-${sk}`, target: 'merge-node', sourceHandle: 'source', targetHandle: 'target', type: 'default', style: { stroke: '#6366f1', strokeWidth: 2 } });
   });
 
   // Merge node at bottom center
@@ -61,7 +61,7 @@ export function produceFixedLayout(productLine: string) {
     id: 'merge-node', type: 'mergeNode',
     position: { x: midX, y: MERGE_Y },
     data: { product_line: pl },
-    draggable: false,
+    draggable: true,
   });
 
   return { nodes, edges };

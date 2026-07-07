@@ -38,10 +38,10 @@ export const ShotControlNode: React.FC<Props> = ({ data }) => {
   return (
     <div data-testid={`shot-control-node-${sk}`} onClick={() => data.onSelectShot?.(sk)}
       className={`nodrag bg-[#1a1f2e] border border-white/10 border-l-2 border-l-purple-500/40 hover:border-purple-500/30 rounded-xl p-3 w-44 cursor-pointer transition-colors ${isConnecting ? 'border-purple-400/50 ring-2 ring-purple-500/20' : ''}`}>
-      {/* Target handles for asset binding */}
-      <Handle type="target" position={Position.Left} id="start_frame" data-testid={`shot-node-start-frame-handle-${sk}`} style={{ top: '20%', background: isConnecting ? '#22c55e' : '#22c55e', width: isConnecting ? 18 : 10, height: isConnecting ? 18 : 10 }} title="首帧图" />
-      <Handle type="target" position={Position.Left} id="end_frame" data-testid={`shot-node-end-frame-handle-${sk}`} style={{ top: '50%', background: isConnecting ? '#3b82f6' : '#3b82f6', width: isConnecting ? 18 : 10, height: isConnecting ? 18 : 10 }} title="尾帧图" />
-      <Handle type="target" position={Position.Left} id="reference_image" data-testid={`shot-node-reference-image-handle-${sk}`} style={{ top: '80%', background: isConnecting ? '#eab308' : '#eab308', width: isConnecting ? 18 : 10, height: isConnecting ? 18 : 10 }} title="参考图" />
+      {/* Reference image input — purple, left-center */}
+      <Handle type="target" position={Position.Left} id="target" data-testid={`shot-reference-target-handle-${sk}`} style={{ background: '#8b5cf6', width: 10, height: 10, border: '2px solid #a78bfa' }} title="参考图输入" />
+      {/* Video output — blue, right-center */}
+      <Handle type="source" position={Position.Right} id="source" data-testid={`shot-video-source-handle-${sk}`} style={{ background: '#3b82f6', width: 10, height: 10, border: '2px solid #60a5fa' }} title="视频生成输出" />
 
       <div className="text-xs font-semibold text-gray-200 truncate">{sk}</div>
       <div className="text-[9px] text-gray-500 mt-0.5">{data.shot_name}</div>
