@@ -39,6 +39,12 @@ interface Props {
   onGenerateSingleShot?: (nodeId: string, shotKey: string) => void;
   generatingShotKeys?: string[];
   productLine?: 'desk_calendar' | 'wall_calendar';
+  // Reference image node interactions (10D-1)
+  hoveredRefNodeId?: string | null;
+  onHoverRefNode?: (nodeId: string | null) => void;
+  onDropImageToRefNode?: (nodeId: string, file: File) => void;
+  onDropImageToCanvas?: (file: File, canvasPos: { x: number; y: number }) => void;
+  refImageUrls?: Record<string, string>;
 }
 
 const DEFAULT_SHOTS = [
@@ -147,7 +153,7 @@ const CanvasToolbar: React.FC<{ instance: any; noData: boolean; connectingAssetI
   </div>);
 };
 
-export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefresh, onSelectNode, assets, shotBindings, onConnectBinding, onDeleteBinding, connectingAssetId, onStartConnecting, onCancelConnecting, onRegenerateShot, onGenerateSingleShot, generatingShotKeys, productLine }) => {
+export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefresh, onSelectNode, assets, shotBindings, onConnectBinding, onDeleteBinding, connectingAssetId, onStartConnecting, onCancelConnecting, onRegenerateShot, onGenerateSingleShot, generatingShotKeys, productLine, hoveredRefNodeId, onHoverRefNode, onDropImageToRefNode, onDropImageToCanvas, refImageUrls }) => {
   const noData = !instance || nodes.length === 0;
 
   // Shot data is sourced from the nodes/shotBindings props; visual nodes are produced by produceFixedLayout below.
@@ -219,11 +225,21 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
             nodeReviewStatus: nodeItem?.review_status || '-',
           };
         }
+        if (n.type === 'referenceImageNode') {
+          n.data = {
+            ...n.data,
+            imageUrl: (refImageUrls || {})[n.id] || undefined,
+            isHovered: hoveredRefNodeId === n.id,
+            onHoverStart: (nodeId: string) => onHoverRefNode?.(nodeId),
+            onHoverEnd: () => onHoverRefNode?.(null),
+            onDropImage: (nodeId: string, file: File) => onDropImageToRefNode?.(nodeId, file),
+          };
+        }
         return n;
       }),
       edges: raw.edges,
     };
-  }, [productLine, nodes, shotBindings, onSelectNode, onGenerateSingleShot, generatingShotKeys, connectingAssetId, onConnectBinding]);
+  }, [productLine, nodes, shotBindings, onSelectNode, onGenerateSingleShot, generatingShotKeys, connectingAssetId, onConnectBinding, hoveredRefNodeId, onHoverRefNode, onDropImageToRefNode, refImageUrls]);
 
   const allNodes = useMemo(() => [...fixedLayout.nodes, ...assetNodes, ...videoPreviewNodes], [fixedLayout.nodes, assetNodes, videoPreviewNodes]);
   const allEdges = useMemo(() => [...fixedLayout.edges, ...bindingEdges, ...videoPreviewEdges], [fixedLayout.edges, bindingEdges, videoPreviewEdges]);
@@ -249,17 +265,28 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
 
   const onDrop = useCallback((event: React.DragEvent) => {
     event.preventDefault();
+    // 10D-1: Handle raw image files dropped on canvas blank area
+    const imageFiles = Array.from(event.dataTransfer.files || []).filter(
+      f => ['image/png','image/jpeg','image/webp','image/gif'].includes(f.type)
+    );
+    if (imageFiles.length > 0) {
+      const canvasRect = event.currentTarget.getBoundingClientRect();
+      const canvasPos = { x: event.clientX - canvasRect.left, y: event.clientY - canvasRect.top };
+      imageFiles.forEach(f => onDropImageToCanvas?.(f, canvasPos));
+      return;
+    }
+    // Existing: handle workbench asset drops
     try {
       const raw = event.dataTransfer.getData('application/workbench-asset');
       if (!raw) return;
-      const asset: WorkbenchAsset = JSON.parse(raw);
+      const asset = JSON.parse(raw) as WorkbenchAsset;
       const pos = { x: event.clientX - 350, y: event.clientY - 150 };
       setRfNodes(nds => {
         if (nds.find(n => n.id === `asset-${asset.id}`)) return nds;
         return [...nds, { id: `asset-${asset.id}`, type: 'workbenchAsset', position: pos, data: { asset }, draggable: true }];
       });
     } catch {}
-  }, [setRfNodes]);
+  }, [setRfNodes, onDropImageToCanvas]);
 
   const onDragOver = useCallback((event: React.DragEvent) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; }, []);
 

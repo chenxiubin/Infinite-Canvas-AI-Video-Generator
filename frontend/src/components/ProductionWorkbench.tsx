@@ -32,6 +32,9 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
   const [motionShotVersion, setMotionShotVersion] = useState<'primary' | 'backup'>('primary');
 	const [productLine, setProductLine] = useState<'desk_calendar' | 'wall_calendar'>('desk_calendar');
 	const [generatingShotKeys, setGeneratingShotKeys] = useState<string[]>([]);
+	// 10D-1: Reference image node interactions
+	const [hoveredRefNodeId, setHoveredRefNodeId] = useState<string | null>(null);
+	const [refImageUrls, setRefImageUrls] = useState<Record<string, string>>({});
 
   const batchIdRef = useRef(''); const instanceRef = useRef<InstanceData | null>(null);
   useEffect(() => { batchIdRef.current = batchId; }, [batchId]);
@@ -72,7 +75,7 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
       await api.exportInstance(ai.instance_id); const ei = await api.getVideoInstance(ai.instance_id); setInstance(ei); setNodes(ei.nodes || []); addLog('mock export completed');
     }catch(e){showError(e);addLog(`ERROR: ${e?.message||e}`);}finally{setLoading('');}
   };
-  const handleReset = () => { assets.forEach(a => { if (a.url?.startsWith('blob:')) URL.revokeObjectURL(a.url); }); setProductId('');setChecklist(null);setBatchId('');setInstance(null);setNodes([]);setSelTemplateId('');setError('');setDemoLog([]);batchIdRef.current='';instanceRef.current=null;setSelectedNodeId(null);setAssets([]);setShotBindings([]);setConnectingAssetId(null);setStoryboardConfigs({});setMotionShotVersion('primary'); };
+  const handleReset = () => { assets.forEach(a => { if (a.url?.startsWith('blob:')) URL.revokeObjectURL(a.url); }); Object.values(refImageUrls).forEach(u => { if (u?.startsWith('blob:')) URL.revokeObjectURL(u); }); setProductId('');setChecklist(null);setBatchId('');setInstance(null);setNodes([]);setSelTemplateId('');setError('');setDemoLog([]);batchIdRef.current='';instanceRef.current=null;setSelectedNodeId(null);setAssets([]);setShotBindings([]);setConnectingAssetId(null);setStoryboardConfigs({});setMotionShotVersion('primary');setRefImageUrls({}); };
   const assetsRef = useRef(assets); assetsRef.current = assets;
   useEffect(() => { return () => { assetsRef.current.forEach(a => { if (a.url?.startsWith('blob:')) URL.revokeObjectURL(a.url); }); }; }, []);
 
@@ -184,6 +187,32 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
   const canExport = instance?.review_status==='approved';
   const isReady = checklist?.is_ready;
 
+  // 10D-1: Reference image drop handler — replaces node image with object URL
+  const handleDropImageToRefNode = useCallback((nodeId: string, file: File) => {
+    const blobUrl = URL.createObjectURL(file);
+    setRefImageUrls(prev => {
+      // Revoke previous blob URL for this node if exists
+      if (prev[nodeId]?.startsWith('blob:')) URL.revokeObjectURL(prev[nodeId]);
+      return { ...prev, [nodeId]: blobUrl };
+    });
+  }, []);
+
+  // 10D-1: Canvas blank area image drop — basic callback, full logic deferred to 10D-2
+  const handleDropImageToCanvas = useCallback((_file: File, canvasPos: { x: number; y: number }) => {
+    // TODO 10D-2: Create a free-position ReferenceImageNode at canvasPos
+    // For now, just log position — the callback pathway is established
+    console.log('[10D-2 TODO] Drop image to canvas at', canvasPos);
+  }, []);
+
+  // 10D-1: Revoke blob URLs on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(refImageUrls).forEach(url => {
+        if (url?.startsWith('blob:')) URL.revokeObjectURL(url);
+      });
+    };
+  }, []);
+
   return (
     <div data-testid="mvp3-workbench" className="flex flex-col h-screen bg-[#0a0f1a] text-gray-200 font-sans overflow-hidden">
       {/* Header — fixed height */}
@@ -229,7 +258,13 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
             productLine={productLine}
             connectingAssetId={connectingAssetId}
             onStartConnecting={setConnectingAssetId}
-            onCancelConnecting={() => setConnectingAssetId(null)} />
+            onCancelConnecting={() => setConnectingAssetId(null)}
+            hoveredRefNodeId={hoveredRefNodeId}
+            onHoverRefNode={setHoveredRefNodeId}
+            onDropImageToRefNode={handleDropImageToRefNode}
+            onDropImageToCanvas={handleDropImageToCanvas}
+            refImageUrls={refImageUrls}
+          />
         </main>
 
         {/* Right: Inspector */}
