@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import {
   ReactFlow, ReactFlowProvider, Background, Controls, useReactFlow, useOnViewportChange,
-  Handle, Position, addEdge, useNodesState, useEdgesState, BaseEdge, EdgeLabelRenderer, getBezierPath,
+  addEdge, useNodesState, useEdgesState, BaseEdge, EdgeLabelRenderer, getBezierPath,
   type Node as RFNode, type Edge, type NodeTypes, type EdgeTypes, type Connection, type OnEdgesChange,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -62,58 +62,6 @@ interface Props {
   // 10G-2: Optional size reference shot
   optionalShotEnabled?: boolean;
 }
-
-const DEFAULT_SHOTS = [
-  { shot_key: 'S01_main', shot_name: '主图-正面', shot_order: 1, duration_seconds: 4, required_asset_role: 'main' },
-  { shot_key: 'S02_detail1', shot_name: '细节特写-材质', shot_order: 2, duration_seconds: 3, required_asset_role: 'detail1' },
-  { shot_key: 'S03_detail2', shot_name: '细节特写-结构', shot_order: 3, duration_seconds: 3, required_asset_role: 'detail2' },
-  { shot_key: 'S04_motion', shot_name: '运镜展示', shot_order: 4, duration_seconds: 5, required_asset_role: 'motion' },
-  { shot_key: 'S05_scene', shot_name: '场景陈列', shot_order: 5, duration_seconds: 5, required_asset_role: 'scene' },
-  { shot_key: 'S06_brand', shot_name: '收尾呼应', shot_order: 6, duration_seconds: 4, required_asset_role: 'brand' },
-];
-
-const statusColors: Record<string, string> = { pending: 'border-gray-600/50 bg-[#141a24]', running: 'border-blue-500/50 bg-blue-950/20', success: 'border-green-500/50 bg-green-950/15', failed: 'border-red-500/50 bg-red-950/20' };
-const statusDot: Record<string, string> = { pending: 'bg-gray-500', running: 'bg-blue-400 animate-pulse', success: 'bg-green-400', failed: 'bg-red-400' };
-const reviewBadge: Record<string, string> = { approved: 'text-green-400 bg-green-900/30 border-green-500/30', rejected: 'text-red-400 bg-red-900/30 border-red-500/30', pending: 'text-yellow-400 bg-yellow-900/20 border-yellow-500/30' };
-
-// ==== Custom Node: Shot Node with 3 target Handles ====
-const WorkbenchShotNode: React.FC<{ id: string; data: { item: any; onSelect?: (n: any) => void; assets?: WorkbenchAsset[]; binding?: ShotFrameBinding; connectingAssetId?: string | null; onConnectBinding?: (shotKey: string, frameType: string, assetId: string) => void } }> = ({ id, data }) => {
-  const n = data.item; const st = n.status || 'pending'; const rv = n.review_status || '-';
-  const rvCls = reviewBadge[rv] || 'text-gray-500 bg-gray-800 border-gray-600/20';
-  const binding = data.binding; const sfAsset = data.assets?.find(a => a.id === binding?.startFrameAssetId);
-  const isConnecting = !!data.connectingAssetId;
-  const handleClick = (frameType: string) => (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (isConnecting && data.connectingAssetId) {
-      data.onConnectBinding?.(n.shot_key, frameType, data.connectingAssetId);
-    }
-  };
-  return (
-    <div data-testid={`canvas-node-${n.shot_key}`} onClick={() => data.onSelect?.(n)}
-      className={`cursor-pointer border-2 rounded-xl p-4 w-48 flex-shrink-0 transition-all duration-200 hover:border-white/20 hover:shadow-md ${isConnecting ? 'border-purple-400/50 ring-2 ring-purple-500/20' : statusColors[st] || statusColors.pending}`}>
-      <Handle type="target" position={Position.Left} id="start_frame" data-testid={`shot-node-start-frame-handle-${n.shot_key}`} style={{ top: '20%', background: isConnecting ? '#22c55e' : '#22c55e', width: isConnecting ? 18 : 10, height: isConnecting ? 18 : 10 }} title="首帧图" />
-      <Handle type="target" position={Position.Left} id="end_frame" data-testid={`shot-node-end-frame-handle-${n.shot_key}`} style={{ top: '50%', background: isConnecting ? '#3b82f6' : '#3b82f6', width: isConnecting ? 18 : 10, height: isConnecting ? 18 : 10 }} title="尾帧图" />
-      <Handle type="target" position={Position.Left} id="reference_image" data-testid={`shot-node-reference-image-handle-${n.shot_key}`} style={{ top: '80%', background: isConnecting ? '#eab308' : '#eab308', width: isConnecting ? 18 : 10, height: isConnecting ? 18 : 10 }} title="参考图" />
-      {isConnecting && (
-        <div className="flex gap-1 mt-1">
-          <button data-testid={`shot-node-click-start-frame-${n.shot_key}`} onClick={handleClick('startFrame')} className="flex-1 text-[8px] bg-green-900/50 hover:bg-green-700 text-green-300 rounded px-1 py-0.5 border border-green-500/40">首帧</button>
-          <button data-testid={`shot-node-click-end-frame-${n.shot_key}`} onClick={handleClick('endFrame')} className="flex-1 text-[8px] bg-blue-900/50 hover:bg-blue-700 text-blue-300 rounded px-1 py-0.5 border border-blue-500/40">尾帧</button>
-          <button data-testid={`shot-node-click-reference-${n.shot_key}`} onClick={handleClick('reference')} className="flex-1 text-[8px] bg-yellow-900/50 hover:bg-yellow-700 text-yellow-300 rounded px-1 py-0.5 border border-yellow-500/40">参考</button>
-        </div>
-      )}
-      <div className="flex items-center gap-2 mb-2"><span className={`w-2 h-2 rounded-full flex-shrink-0 ${statusDot[st] || 'bg-gray-500'}`} /><span className="node-title text-xs font-semibold text-gray-100 truncate">{n.shot_name}</span></div>
-      <div className="text-[10px] text-gray-500 mb-1">{n.shot_key}</div>
-      {sfAsset ? (<div className="mb-2 rounded-lg overflow-hidden border border-white/10"><img src={sfAsset.url} alt="首帧" className="w-full h-16 object-cover" /><div className="text-[8px] text-green-400 bg-green-900/30 px-1.5 py-0.5 text-center">首帧已绑定</div></div>) : (<div className="mb-2 rounded-lg border border-dashed border-amber-700/40 bg-amber-900/10 h-16 flex items-center justify-center"><span className="text-[9px] text-amber-500">缺少首帧</span></div>)}
-      <span className={`inline-flex text-[10px] px-2 py-0.5 rounded-full font-medium ${st==='success'?'text-green-300 bg-green-900/40':st==='running'?'text-blue-300 bg-blue-900/40':st==='failed'?'text-red-300 bg-red-900/40':'text-gray-400 bg-gray-800'}`}>{st}</span>
-      <span className={`inline-flex text-[10px] px-2 py-0.5 rounded-full font-medium ml-1 border ${rvCls}`}>{rv}</span>
-      <span data-testid={`node-status-${n.shot_key}`} style={{display:'none'}}>{st}</span>
-      {n.is_prompt_customized && <div className="text-[7px] text-amber-400 mt-1">已自定义</div>}
-      {n.safety_suffix_enabled !== false && <div className="text-[7px] text-gray-500">安全约束</div>}
-      <div className="text-[8px] text-gray-600 truncate">{n.camera_move || ''}{n.motion_intensity ? ' · ' + n.motion_intensity : ''}</div>
-      <div className="mt-2.5 space-y-1 text-[10px]"><div data-testid={`canvas-node-status-${n.shot_key}`} className="text-gray-500">状态: <span className="text-gray-300">{st}</span></div><div data-testid={`canvas-node-review-${n.shot_key}`}>审核: {rv}</div><div className="text-gray-600">素材: {n.bound_asset_role||'-'}</div><div className="text-gray-700 text-[9px] truncate">来源: {n.bound_asset_source||'-'}</div></div>
-    </div>
-  );
-};
 
 // ==== Custom Edge: MaterialEdge with color/label by binding_type ====
 const MaterialEdge: React.FC<{ id: string; sourceX: number; sourceY: number; targetX: number; targetY: number; sourcePosition: any; targetPosition: any; data?: { bindingType?: string; label?: string; onDelete?: (edgeId: string) => void } }> =
