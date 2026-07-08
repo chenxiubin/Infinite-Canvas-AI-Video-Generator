@@ -1,9 +1,9 @@
 import React from 'react';
-import { Zap, RotateCcw, Layers, Cpu } from 'lucide-react';
+import { Zap, RotateCcw, Layers, Cpu, Trash2 } from 'lucide-react';
 
-interface Props { modelAdapter: string; onRunDemo: () => void; onReset: () => void; loading: string; onSwitchToLegacy?: () => void }
+interface Props { modelAdapter: string; onRunDemo: () => void; onReset: () => void; loading: string; onSwitchToLegacy?: () => void; onClearAllRefImages?: () => void; }
 
-export const WorkbenchHeader: React.FC<Props> = ({ modelAdapter, onRunDemo, onReset, loading, onSwitchToLegacy }) => (
+export const WorkbenchHeader: React.FC<Props> = ({ modelAdapter, onRunDemo, onReset, loading, onSwitchToLegacy, onClearAllRefImages }) => (
   <header data-testid="workbench-header"
     className="flex items-center justify-between px-4 py-2 bg-gradient-to-r from-[#0f1520] via-[#141a2e] to-[#1a1030] border-b border-purple-900/20 flex-shrink-0">
     <div className="flex items-center gap-2.5">
@@ -33,6 +33,13 @@ export const WorkbenchHeader: React.FC<Props> = ({ modelAdapter, onRunDemo, onRe
           transition-all duration-150 shadow-sm shadow-purple-900/30 active:scale-95">
         <Zap className="w-3.5 h-3.5" /> 运行完整演示
       </button>
+      {onClearAllRefImages && (
+        <button data-testid="clear-all-fixed-ref-images" onClick={onClearAllRefImages}
+          className="flex items-center gap-1 bg-white/5 hover:bg-white/10 text-amber-500 hover:text-amber-300 text-xs px-2.5 py-1.5 rounded-lg transition-colors"
+          title="清空所有固定参考图节点中的图片，不会删除素材库图片、自由节点和视频结果">
+          <Trash2 className="w-3 h-3" /> 清空工作流参考图
+        </button>
+      )}
       <button data-testid="reset-current-state-button" onClick={onReset}
         className="flex items-center gap-1 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-gray-200 text-xs px-2.5 py-1.5 rounded-lg transition-colors">
         <RotateCcw className="w-3 h-3" /> 重置

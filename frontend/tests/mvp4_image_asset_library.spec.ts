@@ -345,7 +345,6 @@ test.describe('MVP-4 10D-2 Image Asset Library', () => {
     test.setTimeout(30000);
     const canvas = page.getByTestId('production-canvas-view');
     const canvasBox = await canvas.boundingBox();
-    // Drop with name "diff-a.png"
     await canvas.evaluate((el, { pngBytes, cx, cy }) => {
       const file = new File([new Uint8Array(pngBytes)], 'diff-a.png', { type: 'image/png' });
       const dt = new DataTransfer(); dt.items.add(file);
@@ -356,7 +355,6 @@ test.describe('MVP-4 10D-2 Image Asset Library', () => {
     await page.getByTestId('sidebar-icon-assets').hover();
     await expect(page.getByTestId('image-asset-library-panel')).toBeVisible({ timeout: 5000 });
     const c1 = await page.locator('[data-testid^="image-asset-card-"]').count();
-    // Drop again with different name "diff-b.png"
     await canvas.evaluate((el, { pngBytes, cx, cy }) => {
       const file = new File([new Uint8Array(pngBytes)], 'diff-b.png', { type: 'image/png' });
       const dt = new DataTransfer(); dt.items.add(file);
@@ -367,7 +365,82 @@ test.describe('MVP-4 10D-2 Image Asset Library', () => {
     await page.getByTestId('sidebar-icon-assets').hover();
     await expect(page.getByTestId('image-asset-library-panel')).toBeVisible({ timeout: 5000 });
     const c2 = await page.locator('[data-testid^="image-asset-card-"]').count();
-    // Different name = new entry
     expect(c2).toBe(c1 + 1);
+  });
+
+  // ── Library asset drop on reference node ──
+
+  test('10D4-drop-01: drop library asset on empty fixed ref node replaces image', async ({ page }) => {
+    test.setTimeout(30000);
+    const canvas = page.getByTestId('production-canvas-view');
+    const cb = await canvas.boundingBox();
+    // First populate library by dropping a file on canvas
+    await canvas.evaluate((el, { pngBytes, cx, cy }) => {
+      const file = new File([new Uint8Array(pngBytes)], 'lib-node.png', { type: 'image/png' });
+      const dt = new DataTransfer(); dt.items.add(file);
+      const ev = new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true, clientX: cx + 100, clientY: cy + 100 });
+      Object.defineProperty(ev, 'clientX', { value: cx + 100 }); Object.defineProperty(ev, 'clientY', { value: cy + 100 });
+      el.dispatchEvent(ev);
+    }, { pngBytes: MINI_PNG_BYTES, cx: cb!.x, cy: cb!.y });
+    // Get the library asset card id
+    await page.getByTestId('sidebar-icon-assets').hover();
+    await expect(page.getByTestId('image-asset-library-panel')).toBeVisible({ timeout: 5000 });
+    const cardId = (await page.locator('[data-testid^="image-asset-card-"]').first().getAttribute('data-testid') || '').replace('image-asset-card-', '');
+    // Now drop on S03 reference node (which is empty) using assetId
+    const refNode = page.getByTestId('reference-image-node-S03_detail2-0');
+    const refBox = await refNode.boundingBox();
+    await canvas.evaluate((el, { assetId, rx, ry }: any) => {
+      const dt = new DataTransfer();
+      dt.setData('application/workbench-image-asset', JSON.stringify({ assetId }));
+      const ev = new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true, clientX: rx + 30, clientY: ry + 30 });
+      Object.defineProperty(ev, 'clientX', { value: rx + 30 }); Object.defineProperty(ev, 'clientY', { value: ry + 30 });
+      el.dispatchEvent(ev);
+    }, { assetId: cardId, rx: refBox!.x, ry: refBox!.y });
+    // S03 ref node should now show the image
+    await expect(page.getByTestId('reference-image-thumb-S03_detail2-0')).toBeAttached({ timeout: 5000 });
+    // Library count unchanged
+    await page.getByTestId('sidebar-icon-assets').hover();
+    await expect(page.getByTestId('image-asset-library-panel')).toBeVisible({ timeout: 5000 });
+    const libCount = await page.locator('[data-testid^="image-asset-card-"]').count();
+    expect(libCount).toBe(1);
+  });
+
+  test('10D4-drop-02: drop library asset on filled fixed ref node replaces image', async ({ page }) => {
+    test.setTimeout(30000);
+    // Fill S01 with a file drop, then create library entry, then replace with library asset
+    await page.getByTestId('reference-image-node-S01_main-0').evaluate((el, pngBytes) => {
+      const file = new File([new Uint8Array(pngBytes)], 'old.png', { type: 'image/png' });
+      const dt = new DataTransfer(); dt.items.add(file);
+      el.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    }, MINI_PNG_BYTES);
+    // Create another canvas drop to get a different library entry
+    const canvas = page.getByTestId('production-canvas-view');
+    const cb = await canvas.boundingBox();
+    await canvas.evaluate((el, { pngBytes, cx, cy }) => {
+      const file = new File([new Uint8Array(pngBytes)], 'new-lib.png', { type: 'image/png' });
+      const dt = new DataTransfer(); dt.items.add(file);
+      const ev = new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true, clientX: cx + 200, clientY: cy + 200 });
+      Object.defineProperty(ev, 'clientX', { value: cx + 200 }); Object.defineProperty(ev, 'clientY', { value: cy + 200 });
+      el.dispatchEvent(ev);
+    }, { pngBytes: MINI_PNG_BYTES, cx: cb!.x, cy: cb!.y });
+    await page.getByTestId('sidebar-icon-assets').hover();
+    await expect(page.getByTestId('image-asset-library-panel')).toBeVisible({ timeout: 5000 });
+    const cards = page.locator('[data-testid^="image-asset-card-"]');
+    const cardId = (await cards.last().getAttribute('data-testid') || '').replace('image-asset-card-', '');
+    // Drop the new library asset on S01 ref node
+    const refNode = page.getByTestId('reference-image-node-S01_main-0');
+    const refBox = await refNode.boundingBox();
+    await canvas.evaluate((el, { assetId, rx, ry }: any) => {
+      const dt = new DataTransfer();
+      dt.setData('application/workbench-image-asset', JSON.stringify({ assetId }));
+      const ev = new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true, clientX: rx + 30, clientY: ry + 30 });
+      Object.defineProperty(ev, 'clientX', { value: rx + 30 }); Object.defineProperty(ev, 'clientY', { value: ry + 30 });
+      el.dispatchEvent(ev);
+    }, { assetId: cardId, rx: refBox!.x, ry: refBox!.y });
+    // S01 ref still has a thumb (replaced, not removed)
+    await expect(page.getByTestId('reference-image-thumb-S01_main-0')).toBeAttached({ timeout: 5000 });
+    // Library count = 2 (two different files)
+    const libCount = await page.locator('[data-testid^="image-asset-card-"]').count();
+    expect(libCount).toBe(2);
   });
 });

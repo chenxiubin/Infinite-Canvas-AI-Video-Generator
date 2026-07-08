@@ -14,6 +14,10 @@ interface Props {
     // 10D-2: Free node support
     isFreeNode?: boolean;
     onDeleteFreeNode?: () => void;
+    // 10D-4: Clear image from fixed reference node
+    onClearImage?: () => void;
+    // 10D-4: Drop asset from library (assetId-based, not File-based)
+    onDropAsset?: (nodeId: string, assetId: string) => void;
   };
 }
 
@@ -27,12 +31,16 @@ export const ReferenceImageNode: React.FC<Props> = ({ id, data }) => {
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault(); e.stopPropagation();
-    const hasImage = e.dataTransfer.types.includes('Files');
-    if (!hasImage) return;
-    const items = Array.from(e.dataTransfer.items || []);
-    const allImages = items.every(item => ACCEPTED_IMAGE_TYPES.includes(item.type));
-    setIsDragOver(true);
-    setIsDragValid(allImages);
+    // Asset-based drop from library
+    if (e.dataTransfer.types.includes('application/workbench-image-asset')) {
+      setIsDragOver(true); setIsDragValid(true); return;
+    }
+    // File-based drop
+    if (e.dataTransfer.types.includes('Files')) {
+      const items = Array.from(e.dataTransfer.items || []);
+      const allImages = items.every(item => ACCEPTED_IMAGE_TYPES.includes(item.type));
+      setIsDragOver(true); setIsDragValid(allImages); return;
+    }
   }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -42,14 +50,22 @@ export const ReferenceImageNode: React.FC<Props> = ({ id, data }) => {
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault(); e.stopPropagation();
-    setIsDragOver(false);
-    setIsDragValid(false);
+    setIsDragOver(false); setIsDragValid(false);
   }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault(); e.stopPropagation();
-    setIsDragOver(false);
-    setIsDragValid(false);
+    setIsDragOver(false); setIsDragValid(false);
+    // Asset-based drop from library
+    try {
+      const libRaw = e.dataTransfer.getData('application/workbench-image-asset');
+      if (libRaw) {
+        const { assetId } = JSON.parse(libRaw);
+        data.onDropAsset?.(id, assetId);
+        return;
+      }
+    } catch {}
+    // File-based drop
     const files = Array.from(e.dataTransfer.files || []);
     const imageFile = files.find(f => ACCEPTED_IMAGE_TYPES.includes(f.type));
     if (imageFile) {
@@ -73,6 +89,7 @@ export const ReferenceImageNode: React.FC<Props> = ({ id, data }) => {
   return (
     <div
       data-testid={`reference-image-node-${sk}-${idx}`}
+      data-node-id={id}
       className={`bg-[#111827] border rounded-xl p-3 w-32 cursor-pointer group ${
         hasImage ? 'border-white/10 hover:border-purple-500/40 hover:shadow-[0_0_12px_rgba(168,85,247,0.15)]' :
         isDragOver && isDragValid ? 'border-purple-400/60 shadow-[0_0_16px_rgba(168,85,247,0.2)]' :
@@ -122,6 +139,16 @@ export const ReferenceImageNode: React.FC<Props> = ({ id, data }) => {
         )}
       </div>
       <div className="text-[8px] text-gray-600 mt-1 text-center truncate">{data.isFreeNode ? (data.role_label || '自由参考图') : sk}</div>
+      {/* 10D-4: Clear image button for fixed reference nodes that have an image */}
+      {!data.isFreeNode && hasImage && data.onClearImage && (
+        <button
+          data-testid={`clear-ref-image-${id}`}
+          onClick={(e) => { e.stopPropagation(); data.onClearImage?.(); }}
+          className="nodrag mt-1 w-full text-[8px] text-amber-500 hover:text-amber-300 hover:bg-amber-900/20 rounded py-0.5 transition-colors"
+        >
+          清空图片
+        </button>
+      )}
       {/* 10D-2: Delete button for free reference nodes */}
       {data.isFreeNode && data.onDeleteFreeNode && (
         <button
@@ -129,7 +156,7 @@ export const ReferenceImageNode: React.FC<Props> = ({ id, data }) => {
           onClick={(e) => { e.stopPropagation(); data.onDeleteFreeNode?.(); }}
           className="nodrag mt-1 w-full text-[8px] text-red-500 hover:text-red-300 hover:bg-red-900/20 rounded py-0.5 transition-colors"
         >
-          删除
+          删除节点
         </button>
       )}
     </div>

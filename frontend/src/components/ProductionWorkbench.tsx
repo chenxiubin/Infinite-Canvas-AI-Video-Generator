@@ -234,13 +234,11 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
     return { asset: imgAsset, isNew: true };
   }, []);
 
-  // 10D-2: Reference image drop handler — adds to library + replaces node image
+  // 10D-2: Reference image drop handler — adds to library + replaces node image.
+  // Do NOT revoke old URL — it may still be referenced by imageAssets.
   const handleDropImageToRefNode = useCallback(async (nodeId: string, file: File) => {
     const { asset } = await addImageAssetFromFile(file, 'drop-reference-node');
-    setRefImageUrls(prev => {
-      if (prev[nodeId]?.startsWith('blob:')) URL.revokeObjectURL(prev[nodeId]);
-      return { ...prev, [nodeId]: asset.url };
-    });
+    setRefImageUrls(prev => ({ ...prev, [nodeId]: asset.url }));
   }, [addImageAssetFromFile]);
 
   // 10D-2: Canvas blank area image drop — adds to library + creates free ReferenceImageNode
@@ -251,8 +249,33 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
   }, [addImageAssetFromFile]);
 
   // 10D-2: Delete free reference node (does NOT delete the image from library)
+  // 10D-4: Also cleans up related manualEdges
   const handleDeleteFreeRefNode = useCallback((nodeId: string) => {
     setFreeRefNodes(prev => prev.filter(n => n.id !== nodeId));
+    setManualEdges(prev => prev.filter(edge => edge.source !== nodeId && edge.target !== nodeId));
+  }, []);
+
+  // 10D-4: Replace reference node image with library asset (by assetId)
+  const handleDropAssetToRefNode = useCallback((nodeId: string, assetId: string) => {
+    const asset = imageAssetsRef.current.find(a => a.id === assetId);
+    if (!asset) return;
+    setRefImageUrls(prev => ({ ...prev, [nodeId]: asset.url }));
+  }, []);
+
+  // 10D-4: Clear image from a fixed reference node (keeps node, edges, library, asset URLs).
+  // IMPORTANT: Do NOT revoke blob URLs here — the same URL may be shared with imageAssets.
+  const handleClearReferenceNodeImage = useCallback((nodeId: string) => {
+    setRefImageUrls(prev => {
+      const next = { ...prev };
+      delete next[nodeId];
+      return next;
+    });
+  }, []);
+
+  // 10D-4: Clear all fixed reference node images at once.
+  // IMPORTANT: Do NOT revoke — URLs are owned by imageAssets, not refImageUrls.
+  const handleClearAllFixedReferenceImages = useCallback(() => {
+    setRefImageUrls({});
   }, []);
 
   // Create free node from library ImageAsset by assetId.
@@ -293,10 +316,8 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
     const source = targetNodeId ? 'paste-reference-node' : 'paste-canvas';
     const { asset } = await addImageAssetFromFile(file, source);
     if (targetNodeId) {
-      setRefImageUrls(prev => {
-        if (prev[targetNodeId]?.startsWith('blob:')) URL.revokeObjectURL(prev[targetNodeId]);
-        return { ...prev, [targetNodeId]: asset.url };
-      });
+      // Do NOT revoke old URL — it may still be in imageAssets
+      setRefImageUrls(prev => ({ ...prev, [targetNodeId]: asset.url }));
     } else {
       const freeId = `free-ref-${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       setFreeRefNodes(prev => [...prev, { id: freeId, imageAssetId: asset.id, position: canvasMousePosRef.current }]);
@@ -346,7 +367,7 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
   return (
     <div data-testid="mvp3-workbench" className="flex flex-col h-screen bg-[#0a0f1a] text-gray-200 font-sans overflow-hidden">
       {/* Header — fixed height */}
-      <WorkbenchHeader modelAdapter={modelAdapter} onRunDemo={handleFullDemo} onReset={handleReset} loading={loading} onSwitchToLegacy={onSwitchToLegacy} />
+      <WorkbenchHeader modelAdapter={modelAdapter} onRunDemo={handleFullDemo} onReset={handleReset} loading={loading} onSwitchToLegacy={onSwitchToLegacy} onClearAllRefImages={handleClearAllFixedReferenceImages} />
 
       {/* Status Summary — fixed height */}
       <div className="flex-shrink-0 border-b border-white/5 bg-[#0d1117]">
@@ -396,6 +417,8 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
             freeRefNodes={freeRefNodes}
             imageAssets={imageAssets}
             onDeleteFreeRefNode={handleDeleteFreeRefNode}
+            onClearRefNodeImage={handleClearReferenceNodeImage}
+            onDropAssetToRefNode={handleDropAssetToRefNode}
             onCanvasMouseMove={handleCanvasMouseMove}
             manualEdges={manualEdges}
             onManualEdgeCreate={(edge: any) => setManualEdges(prev => [...prev, edge])}

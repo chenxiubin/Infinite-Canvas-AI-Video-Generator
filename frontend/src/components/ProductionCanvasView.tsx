@@ -56,6 +56,9 @@ interface Props {
   onCreateFreeFromLibraryAsset?: (assetId: string, position: { x: number; y: number }) => void;
   // Legacy: create free node from workbench asset
   onManualFreeNodeFromAsset?: (freeId: string, asset: WorkbenchAsset, position: { x: number; y: number }) => void;
+  // 10D-4: Clear image / drop asset on reference node
+  onClearRefNodeImage?: (nodeId: string) => void;
+  onDropAssetToRefNode?: (nodeId: string, assetId: string) => void;
 }
 
 const DEFAULT_SHOTS = [
@@ -143,7 +146,7 @@ const CanvasToolbar: React.FC<{ instance: any; noData: boolean; connectingAssetI
   </div>);
 };
 
-export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefresh, onSelectNode, assets, shotBindings, onConnectBinding, onDeleteBinding, connectingAssetId, onStartConnecting, onCancelConnecting, onRegenerateShot, onGenerateSingleShot, generatingShotKeys, productLine, onHoverRefNode, onDropImageToRefNode, onDropImageToCanvas, refImageUrls, freeRefNodes, imageAssets, onDeleteFreeRefNode, onCanvasMouseMove, manualEdges, onManualEdgeCreate, onCreateFreeFromLibraryAsset, onManualFreeNodeFromAsset }) => {
+export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefresh, onSelectNode, assets, shotBindings, onConnectBinding, onDeleteBinding, connectingAssetId, onStartConnecting, onCancelConnecting, onRegenerateShot, onGenerateSingleShot, generatingShotKeys, productLine, onHoverRefNode, onDropImageToRefNode, onDropImageToCanvas, refImageUrls, freeRefNodes, imageAssets, onDeleteFreeRefNode, onCanvasMouseMove, manualEdges, onManualEdgeCreate, onCreateFreeFromLibraryAsset, onManualFreeNodeFromAsset, onClearRefNodeImage, onDropAssetToRefNode }) => {
   const noData = !instance || nodes.length === 0;
 
   // Shot data is sourced from the nodes/shotBindings props; visual nodes are produced by produceFixedLayout below.
@@ -220,13 +223,16 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
             onHoverStart: (nodeId: string) => onHoverRefNode?.(nodeId),
             onHoverEnd: () => onHoverRefNode?.(null),
             onDropImage: (nodeId: string, file: File) => onDropImageToRefNode?.(nodeId, file),
+            // 10D-4: Clear image / drop asset on fixed reference node
+            onClearImage: () => onClearRefNodeImage?.(n.id),
+            onDropAsset: (nodeId: string, assetId: string) => onDropAssetToRefNode?.(nodeId, assetId),
           };
         }
         return n;
       }),
       edges: raw.edges,
     };
-  }, [productLine, nodes, shotBindings, onSelectNode, onGenerateSingleShot, generatingShotKeys, connectingAssetId, onConnectBinding, onDropImageToRefNode, refImageUrls]);
+  }, [productLine, nodes, shotBindings, onSelectNode, onGenerateSingleShot, generatingShotKeys, connectingAssetId, onConnectBinding, onDropImageToRefNode, refImageUrls, onClearRefNodeImage, onDropAssetToRefNode]);
 
   // 10D-2: Build free reference nodes (dropped on canvas blank area)
   const freeRefNodesRf: RFNode[] = useMemo(() => (freeRefNodes || []).map(frn => {
@@ -245,6 +251,7 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
         onHoverStart: (nodeId: string) => onHoverRefNode?.(nodeId),
         onHoverEnd: () => onHoverRefNode?.(null),
         onDropImage: (nodeId: string, file: File) => onDropImageToRefNode?.(nodeId, file),
+        onDropAsset: (nodeId: string, assetId: string) => onDropAssetToRefNode?.(nodeId, assetId),
         onDeleteFreeNode: () => onDeleteFreeRefNode?.(frn.id),
       },
       draggable: true,
@@ -326,14 +333,32 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
       imageFiles.forEach(f => onDropImageToCanvas?.(f, canvasPos));
       return;
     }
-    // Handle library image-asset drags — create free ReferenceImageNode by assetId
+    // Handle library image-asset drags — hit-test reference nodes first
     try {
       const libRaw = event.dataTransfer.getData('application/workbench-image-asset');
       if (libRaw) {
         const { assetId } = JSON.parse(libRaw);
         const canvasRect = event.currentTarget.getBoundingClientRect();
         const pos = { x: event.clientX - canvasRect.left, y: event.clientY - canvasRect.top };
-        onCreateFreeFromLibraryAsset?.(assetId, pos);
+        // Hit-test: check if the drop point is over any reference node's bounding box
+        const refNodeEls = event.currentTarget.querySelectorAll('[data-testid^="reference-image-node-"]');
+        let hitNode: string | null = null;
+        for (const el of Array.from(refNodeEls)) {
+          const r = el.getBoundingClientRect();
+          // Expand hit area by 16px on each side for easier targeting
+          if (event.clientX >= r.left - 16 && event.clientX <= r.right + 16 &&
+              event.clientY >= r.top - 16 && event.clientY <= r.bottom + 16) {
+            hitNode = el.getAttribute('data-node-id');
+            break;
+          }
+        }
+        if (hitNode) {
+          // Drop over a reference node — replace its image
+          onDropAssetToRefNode?.(hitNode, assetId);
+        } else {
+          // Drop on blank canvas — create free node
+          onCreateFreeFromLibraryAsset?.(assetId, pos);
+        }
         return;
       }
     } catch {}
