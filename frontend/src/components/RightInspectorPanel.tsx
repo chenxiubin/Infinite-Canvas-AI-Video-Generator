@@ -37,6 +37,8 @@ interface Props {
   onSetMotionShotVersion?: (v: 'primary' | 'backup') => void;
   // 10E: Per-shot reference lists
   shotReferences?: Record<string, any[]>;
+  // 10F: Move reference ordering
+  onMoveShotRefOrder?: (shotKey: string, sourceNodeId: string, direction: 'up' | 'down') => void;
 }
 
 const reviewBadgeCls: Record<string, string> = {
@@ -53,7 +55,7 @@ const statusBadgeCls: Record<string, string> = {
   failed: 'text-red-400 bg-red-900/30 border-red-500/30',
 };
 
-export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefresh, instance, modelAdapter, batchStatus, nodeCount, assets, selectedBinding, getBoundAsset, onBindShotFrame, onGenerateSingleShot, onRegenerateShot, onReviewAction, generatingShotKeys, storyboardConfigs, onUpdateStoryboardConfig, motionShotVersion, onSetMotionShotVersion, productLine, shotReferences }) => {
+export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefresh, instance, modelAdapter, batchStatus, nodeCount, assets, selectedBinding, getBoundAsset, onBindShotFrame, onGenerateSingleShot, onRegenerateShot, onReviewAction, generatingShotKeys, storyboardConfigs, onUpdateStoryboardConfig, motionShotVersion, onSetMotionShotVersion, productLine, shotReferences, onMoveShotRefOrder }) => {
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -133,7 +135,20 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
                   const total = refs.length;
                   const useRefLabels = total > 2;
                   return refs.map((ref: any, i: number) => (
-                    <div key={ref.id} data-testid={`inspector-ref-item-${i}`} className="flex items-center gap-2 text-[9px]">
+                    <div key={ref.id} data-testid={`inspector-ref-item-${i}`} className="flex items-center gap-1.5 text-[9px]">
+                      {/* 10F: Move up/down buttons */}
+                      {onMoveShotRefOrder && (
+                        <div className="flex flex-col gap-0.5 mr-0.5">
+                          <button data-testid={`ref-move-up-${i}`}
+                            onClick={() => onMoveShotRefOrder(node.shot_key, ref.sourceNodeId, 'up')}
+                            disabled={i === 0}
+                            className="text-[8px] text-gray-500 hover:text-gray-300 disabled:opacity-20 leading-none">▲</button>
+                          <button data-testid={`ref-move-down-${i}`}
+                            onClick={() => onMoveShotRefOrder(node.shot_key, ref.sourceNodeId, 'down')}
+                            disabled={i === refs.length - 1}
+                            className="text-[8px] text-gray-500 hover:text-gray-300 disabled:opacity-20 leading-none">▼</button>
+                        </div>
+                      )}
                       <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${ref.status === 'ready' ? 'bg-green-400' : 'bg-amber-500'}`} />
                       <span className="text-gray-500 w-5 flex-shrink-0">
                         {useRefLabels ? `R${i+1}` : (i === 0 ? '首帧' : '尾帧')}

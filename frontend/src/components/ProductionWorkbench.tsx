@@ -55,8 +55,10 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
 	const [freeRefNodes, setFreeRefNodes] = useState<FreeRefNode[]>([]);
 	// Manual edges created by user dragging between handles (separate from fixed layout edges)
 	const [manualEdges, setManualEdges] = useState<any[]>([]);
+	// 10F: Per-shot reference ordering (sourceNodeId array)
+	const [shotReferenceOrders, setShotReferenceOrders] = useState<Record<string, string[]>>({});
 
-  // 10E: Derive per-shot reference lists from fixed + manual edges
+  // 10E: Derive per-shot reference lists from fixed + manual edges, 10F applies ordering
   const shotReferences = React.useMemo<Record<string, ShotReferenceItem[]>>(() => {
     const result: Record<string, ShotReferenceItem[]> = {};
     const SHOT_KEYS = ['S01_main','S02_detail1','S03_detail2','S04_motion','S05_scene','S06_brand'];
@@ -89,8 +91,24 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
         order: (REF_COUNTS[targetShotKey] || 1) + ei,
       });
     });
+    // 10F: Apply per-shot ordering, then clean orders of stale ids
+    Object.keys(result).forEach(sk => {
+      const order = shotReferenceOrders[sk];
+      if (order && order.length > 0) {
+        const idSet = new Set(result[sk].map(r => r.sourceNodeId));
+        const validOrder = order.filter(id => idSet.has(id));
+        // Append any new items not in order
+        result[sk].forEach(r => { if (!validOrder.includes(r.sourceNodeId)) validOrder.push(r.sourceNodeId); });
+        // Reorder
+        const ordered = validOrder.map((nodeId, i) => {
+          const item = result[sk].find(r => r.sourceNodeId === nodeId)!;
+          return { ...item, order: i };
+        });
+        result[sk] = ordered;
+      }
+    });
     return result;
-  }, [refImageUrls, manualEdges, freeRefNodes, imageAssets]);
+  }, [refImageUrls, manualEdges, freeRefNodes, imageAssets, shotReferenceOrders]);
 
   const batchIdRef = useRef(''); const instanceRef = useRef<InstanceData | null>(null);
   useEffect(() => { batchIdRef.current = batchId; }, [batchId]);
@@ -211,10 +229,11 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
     try {
       const config = (storyboardConfigs || {})[shotKey] || getDefaultStoryboardConfig(shotKey, productLine, motionShotVersion);
       const prompt = buildFinalPrompt(config);
-      // 10E: Include ready reference images in generate payload
+      // 10E/10F: Include ready reference images in order
       const refs = (shotReferences || {})[shotKey] || [];
-      const reference_images = refs.filter(r => r.status === 'ready').map(r => ({
-        nodeId: r.sourceNodeId, imageAssetId: r.imageAssetId, url: r.imageUrl, fileName: r.fileName, kind: r.kind, order: r.order,
+      const readyRefs = refs.filter(r => r.status === 'ready');
+      const reference_images = readyRefs.map((r, i) => ({
+        nodeId: r.sourceNodeId, imageAssetId: r.imageAssetId, url: r.imageUrl, fileName: r.fileName, kind: r.kind, order: i,
       }));
       // Expose for test verification
       if (typeof window !== 'undefined') (window as any).__lastGeneratePayload = { shotKey, nodeId, prompt, reference_images };
@@ -299,10 +318,41 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
 
   // 10D-2: Delete free reference node (does NOT delete the image from library)
   // 10D-4: Also cleans up related manualEdges
+  // 10F: Also cleans up shotReferenceOrders
   const handleDeleteFreeRefNode = useCallback((nodeId: string) => {
     setFreeRefNodes(prev => prev.filter(n => n.id !== nodeId));
     setManualEdges(prev => prev.filter(edge => edge.source !== nodeId && edge.target !== nodeId));
+    setShotReferenceOrders(prev => {
+      const next: Record<string, string[]> = {};
+      let changed = false;
+      Object.keys(prev).forEach(sk => {
+        const filtered = prev[sk].filter(id => id !== nodeId);
+        if (filtered.length !== prev[sk].length) changed = true;
+        if (filtered.length > 0) next[sk] = filtered;
+        else changed = true;
+      });
+      return changed ? next : prev;
+    });
   }, []);
+
+  // 10F: Move a reference up/down within its shot's ordering
+  const handleMoveShotRefOrder = useCallback((shotKey: string, sourceNodeId: string, direction: 'up' | 'down') => {
+    setShotReferenceOrders(prev => {
+      const current = prev[shotKey] || [];
+      const idx = current.indexOf(sourceNodeId);
+      if (idx < 0) {
+        // Initialize order from current shotReferences (default order)
+        const refs = (shotReferences as any)[shotKey] || [];
+        const newOrder = refs.map((r: any) => r.sourceNodeId);
+        return { ...prev, [shotKey]: newOrder };
+      }
+      const newIdx = direction === 'up' ? idx - 1 : idx + 1;
+      if (newIdx < 0 || newIdx >= current.length) return prev;
+      const next = [...current];
+      [next[idx], next[newIdx]] = [next[newIdx], next[idx]];
+      return { ...prev, [shotKey]: next };
+    });
+  }, [shotReferences]);
 
   // 10D-4: Replace reference node image with library asset (by assetId)
   const handleDropAssetToRefNode = useCallback((nodeId: string, assetId: string) => {
@@ -488,6 +538,7 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
             generatingShotKeys={generatingShotKeys} productLine={productLine}
             onReviewAction={handleReviewAction}
             shotReferences={shotReferences}
+            onMoveShotRefOrder={handleMoveShotRefOrder}
           />
         </div>
       </div>
