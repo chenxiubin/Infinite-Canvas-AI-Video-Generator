@@ -37,8 +37,10 @@ interface Props {
   onSetMotionShotVersion?: (v: 'primary' | 'backup') => void;
   // 10E: Per-shot reference lists
   shotReferences?: Record<string, any[]>;
-  // 10F: Move reference ordering
+  // 10F: Move reference ordering (up/down buttons)
   onMoveShotRefOrder?: (shotKey: string, sourceNodeId: string, direction: 'up' | 'down') => void;
+  // 10F-2: Drag reorder — set full order array
+  onDragSortOrder?: (shotKey: string, orderedIds: string[]) => void;
 }
 
 const reviewBadgeCls: Record<string, string> = {
@@ -55,7 +57,7 @@ const statusBadgeCls: Record<string, string> = {
   failed: 'text-red-400 bg-red-900/30 border-red-500/30',
 };
 
-export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefresh, instance, modelAdapter, batchStatus, nodeCount, assets, selectedBinding, getBoundAsset, onBindShotFrame, onGenerateSingleShot, onRegenerateShot, onReviewAction, generatingShotKeys, storyboardConfigs, onUpdateStoryboardConfig, motionShotVersion, onSetMotionShotVersion, productLine, shotReferences, onMoveShotRefOrder }) => {
+export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefresh, instance, modelAdapter, batchStatus, nodeCount, assets, selectedBinding, getBoundAsset, onBindShotFrame, onGenerateSingleShot, onRegenerateShot, onReviewAction, generatingShotKeys, storyboardConfigs, onUpdateStoryboardConfig, motionShotVersion, onSetMotionShotVersion, productLine, shotReferences, onMoveShotRefOrder, onDragSortOrder }) => {
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -126,32 +128,49 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
             {/* 10E: Reference image list for this shot */}
             {node.shot_key && shotReferences && shotReferences[node.shot_key] && (
               <div data-testid="inspector-shot-references" className="bg-[#0a0f1a] rounded-lg p-2.5 border border-white/5 space-y-1">
-                <div className="text-gray-400 text-[10px] font-medium">参考图列表</div>
+                <div className="text-gray-400 text-[10px] font-medium">参考图列表（可拖拽排序）</div>
                 <div className="text-[9px] text-gray-500">
                   共 {shotReferences[node.shot_key].length} 张 · ready {shotReferences[node.shot_key].filter((r: any) => r.status === 'ready').length}
                 </div>
                 {(() => {
                   const refs = shotReferences[node.shot_key];
-                  const total = refs.length;
-                  const useRefLabels = total > 2;
+                  const readyCount = refs.filter((r: any) => r.status === 'ready').length;
                   return refs.map((ref: any, i: number) => (
-                    <div key={ref.id} data-testid={`inspector-ref-item-${i}`} className="flex items-center gap-1.5 text-[9px]">
-                      {/* 10F: Move up/down buttons */}
-                      {onMoveShotRefOrder && (
-                        <div className="flex flex-col gap-0.5 mr-0.5">
-                          <button data-testid={`ref-move-up-${i}`}
-                            onClick={() => onMoveShotRefOrder(node.shot_key, ref.sourceNodeId, 'up')}
-                            disabled={i === 0}
-                            className="text-[8px] text-gray-500 hover:text-gray-300 disabled:opacity-20 leading-none">▲</button>
-                          <button data-testid={`ref-move-down-${i}`}
-                            onClick={() => onMoveShotRefOrder(node.shot_key, ref.sourceNodeId, 'down')}
-                            disabled={i === refs.length - 1}
-                            className="text-[8px] text-gray-500 hover:text-gray-300 disabled:opacity-20 leading-none">▼</button>
-                        </div>
-                      )}
+                    <div key={ref.id}
+                      data-testid={`shot-ref-order-item-${node.shot_key}-${ref.sourceNodeId}`}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('text/plain', ref.sourceNodeId);
+                        e.dataTransfer.effectAllowed = 'move';
+                        (e.currentTarget as HTMLElement).style.opacity = '0.4';
+                      }}
+                      onDragEnd={(e) => {
+                        (e.currentTarget as HTMLElement).style.opacity = '1';
+                      }}
+                      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const draggedId = e.dataTransfer.getData('text/plain');
+                        if (draggedId && draggedId !== ref.sourceNodeId && onDragSortOrder) {
+                          const newOrder = refs.map(r => r.sourceNodeId);
+                          const fromIdx = newOrder.indexOf(draggedId);
+                          const toIdx = i;
+                          if (fromIdx >= 0 && fromIdx !== toIdx) {
+                            newOrder.splice(fromIdx, 1);
+                            newOrder.splice(toIdx, 0, draggedId);
+                            onDragSortOrder(node.shot_key, newOrder);
+                          }
+                        }
+                      }}
+                      className="flex items-center gap-1.5 text-[9px] cursor-grab active:cursor-grabbing hover:bg-white/5 rounded px-1 py-0.5 transition-colors">
+                      {/* Drag handle */}
+                      <span data-testid={`shot-ref-drag-handle-${node.shot_key}-${ref.sourceNodeId}`} className="text-gray-600 cursor-grab flex-shrink-0">⠿</span>
                       <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${ref.status === 'ready' ? 'bg-green-400' : 'bg-amber-500'}`} />
-                      <span className="text-gray-500 w-5 flex-shrink-0">
-                        {useRefLabels ? `R${i+1}` : (i === 0 ? '首帧' : '尾帧')}
+                      <span className="text-gray-500 w-12 flex-shrink-0">
+                        {readyCount <= 2
+                          ? (i === 0 ? '首帧' : i === 1 ? '尾帧' : `参考图 ${i+1}`)
+                          : `参考图 ${i+1}`
+                        }
                       </span>
                       <span className="text-gray-400">{ref.kind === 'fixed' ? '固定' : '自由'}</span>
                       <span className="text-gray-300 truncate flex-1">{ref.fileName || ref.sourceNodeId}</span>

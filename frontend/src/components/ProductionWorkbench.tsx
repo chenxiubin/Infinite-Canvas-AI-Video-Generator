@@ -354,6 +354,11 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
     });
   }, [shotReferences]);
 
+  // 10F-2: Drag reorder — set full order array for a shot
+  const handleDragSortOrder = useCallback((shotKey: string, orderedIds: string[]) => {
+    setShotReferenceOrders(prev => ({ ...prev, [shotKey]: orderedIds }));
+  }, []);
+
   // 10D-4: Replace reference node image with library asset (by assetId)
   const handleDropAssetToRefNode = useCallback((nodeId: string, assetId: string) => {
     const asset = imageAssetsRef.current.find(a => a.id === assetId);
@@ -539,6 +544,7 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
             onReviewAction={handleReviewAction}
             shotReferences={shotReferences}
             onMoveShotRefOrder={handleMoveShotRefOrder}
+            onDragSortOrder={handleDragSortOrder}
           />
         </div>
       </div>
