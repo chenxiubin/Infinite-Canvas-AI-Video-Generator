@@ -44,6 +44,9 @@ interface Props {
   // 10G-2: Per-shot batch count
   shotBatchCounts?: Record<string, number>;
   onSetShotBatchCount?: (shotKey: string, count: number) => void;
+  // 10I: Video asset library for video preview
+  videoAssetsByShot?: Record<string, any[]>;
+  currentVideoByShot?: Record<string, string>;
 }
 
 const reviewBadgeCls: Record<string, string> = {
@@ -60,7 +63,7 @@ const statusBadgeCls: Record<string, string> = {
   failed: 'text-red-400 bg-red-900/30 border-red-500/30',
 };
 
-export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefresh, instance, modelAdapter, batchStatus, nodeCount, assets, selectedBinding, getBoundAsset, onBindShotFrame, onGenerateSingleShot, onRegenerateShot, onReviewAction, generatingShotKeys, storyboardConfigs, onUpdateStoryboardConfig, motionShotVersion, onSetMotionShotVersion, productLine, shotReferences, onMoveShotRefOrder, onDragSortOrder, shotBatchCounts, onSetShotBatchCount }) => {
+export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefresh, instance, modelAdapter, batchStatus, nodeCount, assets, selectedBinding, getBoundAsset, onBindShotFrame, onGenerateSingleShot, onRegenerateShot, onReviewAction, generatingShotKeys, storyboardConfigs, onUpdateStoryboardConfig, motionShotVersion, onSetMotionShotVersion, productLine, shotReferences, onMoveShotRefOrder, onDragSortOrder, shotBatchCounts, onSetShotBatchCount, videoAssetsByShot, currentVideoByShot }) => {
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -282,11 +285,22 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
               );
             })()}
 
-            {node.video_url && (
+            {/* 10I: Current video preview from video library */}
+            {node.shot_key && (() => {
+              const currentVideoId = (currentVideoByShot || {})[node.shot_key];
+              const currentVideo = currentVideoId ? ((videoAssetsByShot || {})[node.shot_key] || []).find((v: any) => v.id === currentVideoId) : null;
+              if (currentVideo) return (
+                <div data-testid="inspector-current-video" className="bg-[#0a0f1a] rounded-lg p-2.5 border border-white/5">
+                  <div className="text-gray-600 text-[10px] mb-1">当前视频 · {currentVideo.versionLabel}</div>
+                  <span className={`text-[8px] ${currentVideo.reviewStatus === 'approved' ? 'text-green-400' : currentVideo.reviewStatus === 'rejected' ? 'text-red-400' : 'text-amber-400'}`}>{currentVideo.reviewStatus === 'approved' ? '已通过' : currentVideo.reviewStatus === 'rejected' ? '驳回' : '待审'}</span>
+                </div>
+              );
+              return null;
+            })()}
+            {node.video_url && !(currentVideoByShot || {})[node.shot_key] && (
               <div className="bg-[#0a0f1a] rounded-lg p-2.5 border border-white/5">
                 <div className="text-gray-600 text-[10px] mb-1">视频预览</div>
                 <video data-testid="single-shot-video-preview" src={node.video_url} controls preload="metadata" className="w-full rounded border border-white/5" style={{ maxHeight: 160 }} />
-                <div data-testid="canvas-detail-video-url" className="text-green-400 break-all text-[10px] leading-relaxed mt-1">{node.video_url}</div>
               </div>
             )}
             {node.prompt && (

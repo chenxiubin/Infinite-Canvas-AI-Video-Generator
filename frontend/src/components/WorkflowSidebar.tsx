@@ -22,6 +22,10 @@ interface Props {
   // 10G-2: Optional size reference shot
   optionalShotEnabled?: boolean;
   onToggleOptionalShot?: (enabled: boolean) => void;
+  // 10I: Video asset library
+  videoAssetsByShot?: Record<string, any[]>;
+  currentVideoByShot?: Record<string, string>;
+  onSetCurrentVideo?: (shotKey: string, videoId: string) => void;
 }
 
 const SectionCard: React.FC<{ title: string; icon: React.ReactNode; children: React.ReactNode; testid?: string }> =
@@ -180,9 +184,21 @@ export const WorkflowSidebar: React.FC<Props> = (p) => {
     </div>
   );
 
+  // 10I: Tab state for image/video asset library
+  const [assetTab, setAssetTab] = useState<'image' | 'video'>('image');
+
   const renderAssets = () => (
     <div className="space-y-2">
-      {/* 10G-3: Simplified — only the mock image library, no old upload/demo-product panels */}
+      {/* 10I: Image / Video tab toggle */}
+      <div className="flex gap-1 bg-[#111827] border border-white/5 rounded-lg p-0.5">
+        <button data-testid="asset-tab-image" onClick={() => setAssetTab('image')}
+          className={`flex-1 text-[9px] py-1 rounded transition-colors ${assetTab === 'image' ? 'bg-purple-600/30 text-purple-300' : 'text-gray-600 hover:text-gray-400'}`}>图片素材</button>
+        <button data-testid="asset-tab-video" onClick={() => setAssetTab('video')}
+          className={`flex-1 text-[9px] py-1 rounded transition-colors ${assetTab === 'video' ? 'bg-purple-600/30 text-purple-300' : 'text-gray-600 hover:text-gray-400'}`}>视频素材</button>
+      </div>
+
+      {/* Image tab */}
+      {assetTab === 'image' && (
       <div data-testid="image-asset-library-panel" className="max-h-56 overflow-y-auto space-y-1">
         {(p.imageAssets || []).length === 0 ? (
           <div className="text-gray-500 text-[10px] text-center py-4 space-y-0.5">
@@ -211,6 +227,49 @@ export const WorkflowSidebar: React.FC<Props> = (p) => {
           ))
         )}
       </div>
+      )}
+
+      {/* 10I: Video tab — shows video history per shot */}
+      {assetTab === 'video' && (
+        <div data-testid="video-asset-library-panel" className="max-h-56 overflow-y-auto space-y-2">
+          {Object.keys(p.videoAssetsByShot || {}).length === 0 ? (
+            <div className="text-gray-500 text-[10px] text-center py-4 space-y-0.5">
+              <div>暂无视频素材</div>
+              <div className="text-[9px] text-gray-600">生成分镜视频后，会自动保存在这里</div>
+            </div>
+          ) : (
+            Object.entries(p.videoAssetsByShot || {}).map(([shotKey, versions]) => (
+              <div key={shotKey} data-testid={`video-shot-group-${shotKey}`} className="bg-[#111827] border border-white/5 rounded-lg overflow-hidden">
+                <div className="flex items-center gap-2 px-2 py-1.5 bg-[#0d1117] border-b border-white/5">
+                  <span className="text-[9px] text-gray-400 font-medium">{shotKey}</span>
+                </div>
+                {((versions || []) as any[]).map((v: any, i: number) => {
+                  const isCurrent = (p.currentVideoByShot || {})[shotKey] === v.id;
+                  return (
+                    <div key={v.id} data-testid={`video-version-card-${shotKey}-${v.versionLabel}`}
+                      className={`flex items-center gap-2 px-2 py-1.5 border-b border-white/5 last:border-0 ${isCurrent ? 'bg-purple-900/10' : ''}`}>
+                      <span className="text-[8px] text-gray-500 w-6 flex-shrink-0">{v.versionLabel}</span>
+                      <span className="text-[8px] text-gray-400 flex-1 truncate">{v.shotKey}</span>
+                      {isCurrent ? (
+                        <span data-testid={`video-current-badge-${shotKey}-${v.versionLabel}`} className="text-[7px] text-purple-300 bg-purple-900/30 px-1 rounded flex-shrink-0">当前使用中</span>
+                      ) : (
+                        p.onSetCurrentVideo && (
+                          <button data-testid={`video-set-current-${shotKey}-${v.versionLabel}`}
+                            onClick={() => { p.onSetCurrentVideo?.(shotKey, v.id); }}
+                            className="text-[7px] text-gray-500 hover:text-purple-300 bg-white/5 hover:bg-purple-900/20 rounded px-1 py-0.5 flex-shrink-0">
+                            设为当前
+                          </button>
+                        )
+                      )}
+                      <span className={`text-[7px] flex-shrink-0 ${v.reviewStatus === 'approved' ? 'text-green-400' : v.reviewStatus === 'rejected' ? 'text-red-400' : 'text-amber-400'}`}>{v.reviewStatus === 'approved' ? '已通过' : v.reviewStatus === 'rejected' ? '驳回' : '待审'}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 

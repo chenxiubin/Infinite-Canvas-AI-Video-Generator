@@ -61,6 +61,9 @@ interface Props {
   shotReferences?: Record<string, any[]>;
   // 10G-2: Optional size reference shot
   optionalShotEnabled?: boolean;
+  // 10I: Video asset library
+  videoAssetsByShot?: Record<string, any[]>;
+  currentVideoByShot?: Record<string, string>;
 }
 
 // ==== Custom Edge: MaterialEdge with color/label by binding_type ====
@@ -96,7 +99,7 @@ const CanvasToolbar: React.FC<{ instance: any; noData: boolean; connectingAssetI
   </div>);
 };
 
-export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefresh, onSelectNode, assets, shotBindings, onConnectBinding, onDeleteBinding, connectingAssetId, onStartConnecting, onCancelConnecting, onRegenerateShot, onGenerateSingleShot, generatingShotKeys, productLine, onHoverRefNode, onDropImageToRefNode, onDropImageToCanvas, refImageUrls, freeRefNodes, imageAssets, onDeleteFreeRefNode, onCanvasMouseMove, manualEdges, onManualEdgeCreate, onCreateFreeFromLibraryAsset, onManualFreeNodeFromAsset, onClearRefNodeImage, onDropAssetToRefNode, shotReferences, optionalShotEnabled }) => {
+export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefresh, onSelectNode, assets, shotBindings, onConnectBinding, onDeleteBinding, connectingAssetId, onStartConnecting, onCancelConnecting, onRegenerateShot, onGenerateSingleShot, generatingShotKeys, productLine, onHoverRefNode, onDropImageToRefNode, onDropImageToCanvas, refImageUrls, freeRefNodes, imageAssets, onDeleteFreeRefNode, onCanvasMouseMove, manualEdges, onManualEdgeCreate, onCreateFreeFromLibraryAsset, onManualFreeNodeFromAsset, onClearRefNodeImage, onDropAssetToRefNode, shotReferences, optionalShotEnabled, videoAssetsByShot, currentVideoByShot }) => {
   const noData = !instance || nodes.length === 0;
 
   // Shot data is sourced from the nodes/shotBindings props; visual nodes are produced by produceFixedLayout below.
@@ -136,8 +139,8 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
             onSelectShot: (skSel: string) => { const node = nodes.find(nn => nn.shot_key === skSel); if (node) onSelectNode?.(node); else onSelectNode?.({ shot_key: skSel, shot_name: skSel, status: 'pending' } as any); },
             onGenerate: (nid: string, shotKey: string) => onGenerateSingleShot?.(nid, shotKey),
             nodeId,
-            hasStartFrame,
-            disabledReason,
+            hasStartFrame: true, // 10I: always allow mock generate, no startFrame gating
+            disabledReason: !nodeId ? '请先生成批次' : '',
             generating: (generatingShotKeys || []).includes(sk),
             connectingAssetId,
             onConnectBinding,
@@ -159,11 +162,35 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
             onDropAsset: (nodeId: string, assetId: string) => onDropAssetToRefNode?.(nodeId, assetId),
           };
         }
+        if (n.type === 'fixedVideoResultNode') {
+          const sk = n.data.shot_key;
+          const currentVideoId = (currentVideoByShot || {})[sk];
+          const currentVideo = currentVideoId ? ((videoAssetsByShot || {})[sk] || []).find((v: any) => v.id === currentVideoId) : null;
+          n.data = { ...n.data, currentVideo: currentVideo || null };
+        }
+        if (n.type === 'mergeNode') {
+          const isWall = (productLine || 'desk_calendar') === 'wall_calendar';
+          const shotKeys = [...(isWall ? ([] as string[]) : ([] as string[]))];
+          // Use the actual shot keys from fixedLayout nodes
+          const layoutShotKeys = raw.nodes.filter((rn: any) => rn.type === 'shotControlNode').map((rn: any) => rn.data?.shot_key).filter(Boolean);
+          const allApproved = layoutShotKeys.every((sk: string) => {
+            const cid = (currentVideoByShot || {})[sk];
+            const cv = cid ? ((videoAssetsByShot || {})[sk] || []).find((v: any) => v.id === cid) : null;
+            return cv?.reviewStatus === 'approved';
+          });
+          const totalCount = layoutShotKeys.length;
+          const approvedCount = layoutShotKeys.filter((sk: string) => {
+            const cid = (currentVideoByShot || {})[sk];
+            const cv = cid ? ((videoAssetsByShot || {})[sk] || []).find((v: any) => v.id === cid) : null;
+            return cv?.reviewStatus === 'approved';
+          }).length;
+          n.data = { ...n.data, canMerge: allApproved, mergeStatus: approvedCount > 0 ? `${approvedCount}/${totalCount} 已通过` : '等待全部分镜审核通过' };
+        }
         return n;
       }),
       edges: raw.edges,
     };
-  }, [productLine, nodes, shotBindings, onSelectNode, onGenerateSingleShot, generatingShotKeys, connectingAssetId, onConnectBinding, onDropImageToRefNode, refImageUrls, onClearRefNodeImage, onDropAssetToRefNode, shotReferences, optionalShotEnabled]);
+  }, [productLine, nodes, shotBindings, onSelectNode, onGenerateSingleShot, generatingShotKeys, connectingAssetId, onConnectBinding, onDropImageToRefNode, refImageUrls, onClearRefNodeImage, onDropAssetToRefNode, shotReferences, optionalShotEnabled, videoAssetsByShot, currentVideoByShot]);
 
   // 10D-2: Build free reference nodes (dropped on canvas blank area)
   const freeRefNodesRf: RFNode[] = useMemo(() => (freeRefNodes || []).map(frn => {

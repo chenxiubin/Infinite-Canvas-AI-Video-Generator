@@ -23,6 +23,9 @@ interface ImageAsset { id: string; name: string; url: string; mimeType: string; 
 // 10D-2: Free-standing reference image node (not part of fixed layout)
 interface FreeRefNode { id: string; imageAssetId: string; position: { x: number; y: number }; }
 
+// 10I: Video asset version — stored in front-end mock library
+interface VideoAssetVersion { id: string; shotKey: string; shotTitle: string; productLine: string; videoUrl: string; thumbnailUrl?: string; createdAt: number; versionLabel: string; reviewStatus: 'pending'|'approved'|'rejected'; rejectReason?: string; source: 'single-generate'|'full-demo'|'history-restore'; }
+
 // 10E: Per-shot reference image list derived from canvas connections
 interface ShotReferenceItem {
   id: string; sourceNodeId: string; imageAssetId?: string; imageUrl?: string;
@@ -49,6 +52,9 @@ export const ProductionWorkbench: React.FC = () => {
   // 10G-2: Optional size reference shot + per-shot batch counts
   const [optionalShotEnabled, setOptionalShotEnabled] = useState(false);
   const [shotBatchCounts, setShotBatchCounts] = useState<Record<string, number>>({});
+  // 10I: Video asset library
+  const [videoAssetsByShot, setVideoAssetsByShot] = useState<Record<string, VideoAssetVersion[]>>({});
+  const [currentVideoByShot, setCurrentVideoByShot] = useState<Record<string, string>>({});
   const handleSetProductLine = useCallback((pl: 'desk_calendar' | 'wall_calendar') => {
     if (pl === productLine) return;
     setProductLine(pl);
@@ -165,6 +171,11 @@ export const ProductionWorkbench: React.FC = () => {
       await api.generateVideoBatch(bd.batch_id); const fb=await api.getVideoBatch(bd.batch_id);
       if(fb.instances?.length){const fi=await api.getVideoInstance(fb.instances[0].instance_id);setInstance(fi);setNodes(fi.nodes||[]);}
       addLog('generated success');
+      // 10I: Populate video library for all current product line shots
+      const isWall = productLine === 'wall_calendar';
+      const shotKeys = [...(isWall ? SHOT_KEYS_WALL : SHOT_KEYS_DESK), ...(optionalShotEnabled ? (isWall ? ['W08_size_ref'] : ['S07_size_ref']) : [])];
+      const shotNames: Record<string,string> = isWall ? {W01_main:'挂历-正面展示',W02_hanging:'上墙悬挂展示',W03_detail1:'纸张与印刷细节',W04_detail2:'装订与挂孔结构',W05_scene:'家居/办公墙面场景',W06_size:'尺寸与空间比例',W07_brand:'收尾-品牌',W08_size_ref:'尺寸参考同框'} : {S01_main:'主图-正面',S02_detail1:'细节特写-材质',S03_detail2:'细节特写-结构',S04_motion:'运镜展示',S05_scene:'场景陈列',S06_brand:'收尾-品牌',S07_size_ref:'尺寸参考同框'};
+      shotKeys.forEach(sk => { addVideoToLibrary(sk, shotNames[sk] || sk, '/mock/demo-video.mp4', 'full-demo', 'approved'); });
       await api.reviewInstance(fb.instances[0].instance_id, 'approve');
       const ri = await api.getVideoInstance(fb.instances[0].instance_id);
       setInstance(ri); setNodes(ri.nodes || []); addLog('review approved');
@@ -265,8 +276,14 @@ export const ProductionWorkbench: React.FC = () => {
       const batch_count = shotBatchCounts[shotKey] || 1;
       // Expose for test verification
       if (typeof window !== 'undefined') (window as any).__lastGeneratePayload = { shotKey, nodeId, prompt, reference_images, batch_count };
-      const result = await api.generateVideoNode(nodeId, { prompt });
+      // Always force-generate so previously-success nodes also create new versions
+      const result = await api.generateVideoNode(nodeId, { prompt, force: true });
       setNodes(prev => prev.map(n => n.shot_key === shotKey ? { ...n, status: result.status, video_url: result.video_url, cover_url: result.cover_url } : n));
+      // 10I: Auto-add to video library on single-shot generate
+      if (result.status === 'success' && result.video_url) {
+        const shotName = (shotReferences || {})[shotKey]?.[0]?.shot_name || shotKey;
+        addVideoToLibrary(shotKey, shotName, result.video_url, 'single-generate', 'pending');
+      }
     } catch (e: any) { setError(e?.message || '生成失败'); }
     finally { setGeneratingShotKeys(prev => prev.filter(k => k !== shotKey)); }
   };
@@ -386,6 +403,28 @@ export const ProductionWorkbench: React.FC = () => {
   const handleDragSortOrder = useCallback((shotKey: string, orderedIds: string[]) => {
     setShotReferenceOrders(prev => ({ ...prev, [shotKey]: orderedIds }));
   }, []);
+
+  // 10I: Add video to library and set as current (functional setState to avoid stale closure)
+  const addVideoToLibrary = useCallback((shotKey: string, shotTitle: string, videoUrl: string, source: 'single-generate'|'full-demo', reviewStatus: 'pending'|'approved' = 'pending') => {
+    const versionId = `vid_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
+    setVideoAssetsByShot(prev => {
+      const nextVersions = [...(prev[shotKey] || []), {
+        id: versionId, shotKey, shotTitle, productLine,
+        videoUrl, createdAt: Date.now(),
+        versionLabel: `v${(prev[shotKey] || []).length + 1}`,
+        reviewStatus, source,
+      }];
+      return { ...prev, [shotKey]: nextVersions };
+    });
+    setCurrentVideoByShot(prev => ({ ...prev, [shotKey]: versionId }));
+  }, [productLine]);
+
+  // 10I: Set a historical video as current for a shot
+  const handleSetCurrentVideo = useCallback((shotKey: string, videoId: string) => {
+    setCurrentVideoByShot(prev => ({ ...prev, [shotKey]: videoId }));
+  }, []);
+
+  // 10I: Video helpers are React hooks — E2E tests use real UI interactions only
 
   // 10D-4: Replace reference node image with library asset (by assetId)
   const handleDropAssetToRefNode = useCallback((nodeId: string, assetId: string) => {
@@ -527,6 +566,9 @@ export const ProductionWorkbench: React.FC = () => {
             nodes={nodes} imageAssets={imageAssets}
             optionalShotEnabled={optionalShotEnabled}
             onToggleOptionalShot={setOptionalShotEnabled}
+            videoAssetsByShot={videoAssetsByShot}
+            currentVideoByShot={currentVideoByShot}
+            onSetCurrentVideo={handleSetCurrentVideo}
           />
         </div>
 
@@ -560,6 +602,8 @@ export const ProductionWorkbench: React.FC = () => {
             onCreateFreeFromLibraryAsset={handleCreateFreeFromLibraryAsset}
             onManualFreeNodeFromAsset={handleManualFreeNodeFromAsset}
             shotReferences={shotReferences}
+            videoAssetsByShot={videoAssetsByShot}
+            currentVideoByShot={currentVideoByShot}
           />
         </main>
 
@@ -578,6 +622,8 @@ export const ProductionWorkbench: React.FC = () => {
             onDragSortOrder={handleDragSortOrder}
             shotBatchCounts={shotBatchCounts}
             onSetShotBatchCount={(sk, n) => setShotBatchCounts(prev => ({ ...prev, [sk]: n }))}
+            videoAssetsByShot={videoAssetsByShot}
+            currentVideoByShot={currentVideoByShot}
           />
         </div>
       </div>
