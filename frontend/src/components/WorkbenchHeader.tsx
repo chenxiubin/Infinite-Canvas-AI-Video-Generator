@@ -1,9 +1,9 @@
 import React from 'react';
 import { Zap, RotateCcw, Layers, Cpu, Trash2 } from 'lucide-react';
 
-interface Props { modelAdapter: string; onRunDemo: () => void; onReset: () => void; loading: string; onSwitchToLegacy?: () => void; onClearAllRefImages?: () => void; }
+interface Props { modelAdapter: string; adapters?: any[]; onSetModelAdapter?: (k: string) => void; onRunDemo: () => void; onReset: () => void; loading: string; onClearAllRefImages?: () => void; }
 
-export const WorkbenchHeader: React.FC<Props> = ({ modelAdapter, onRunDemo, onReset, loading, onSwitchToLegacy, onClearAllRefImages }) => (
+export const WorkbenchHeader: React.FC<Props> = ({ modelAdapter, adapters, onSetModelAdapter, onRunDemo, onReset, loading, onClearAllRefImages }) => (
   <header data-testid="workbench-header"
     className="flex items-center justify-between px-4 py-2 bg-gradient-to-r from-[#0f1520] via-[#141a2e] to-[#1a1030] border-b border-purple-900/20 flex-shrink-0">
     <div className="flex items-center gap-2.5">
@@ -18,11 +18,22 @@ export const WorkbenchHeader: React.FC<Props> = ({ modelAdapter, onRunDemo, onRe
       </div>
     </div>
     <div className="flex items-center gap-3">
-      <div className="flex items-center gap-1.5 text-[10px] bg-[#0d1117] border border-white/5 rounded-lg px-2.5 py-1">
-        <Cpu className="w-3 h-3 text-purple-400" />
-        <span className="text-gray-500">适配器:</span>
-        <span className="text-purple-300 font-medium">{modelAdapter}</span>
-      </div>
+      {onSetModelAdapter && adapters ? (
+        <select data-testid="model-adapter-header-select" value={modelAdapter}
+          onChange={e => onSetModelAdapter(e.target.value)}
+          className="flex items-center gap-1.5 text-[10px] bg-[#0d1117] border border-white/5 rounded-lg px-2.5 py-1 text-purple-300 font-medium cursor-pointer focus:outline-none focus:border-purple-500/50">
+          <option value="">模型选择</option>
+          {(adapters || []).map((a: any) => (
+            <option key={a.adapter_key} value={a.adapter_key} disabled={!a.configured}>{a.adapter_key}{!a.configured ? ' (未配置)' : ''}</option>
+          ))}
+        </select>
+      ) : (
+        <div className="flex items-center gap-1.5 text-[10px] bg-[#0d1117] border border-white/5 rounded-lg px-2.5 py-1">
+          <Cpu className="w-3 h-3 text-purple-400" />
+          <span className="text-gray-500">模型:</span>
+          <span className="text-purple-300 font-medium">{modelAdapter}</span>
+        </div>
+      )}
       {loading && (
         <span className="text-blue-400 text-[10px] animate-pulse flex items-center gap-1">
           <span className="w-1.5 h-1.5 rounded-full bg-blue-400" /> {loading}
@@ -44,13 +55,6 @@ export const WorkbenchHeader: React.FC<Props> = ({ modelAdapter, onRunDemo, onRe
         className="flex items-center gap-1 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-gray-200 text-xs px-2.5 py-1.5 rounded-lg transition-colors">
         <RotateCcw className="w-3 h-3" /> 重置
       </button>
-      {onSwitchToLegacy && (
-        <button onClick={onSwitchToLegacy}
-          className="flex items-center gap-1 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-gray-200 text-xs px-2.5 py-1.5 rounded-lg transition-colors"
-          title="旧版无限画布">
-          旧版画布
-        </button>
-      )}
       <button data-testid="nav-production-workbench"
         className="flex items-center gap-1 bg-purple-600/30 hover:bg-purple-600/50 text-purple-300 text-xs px-2.5 py-1.5 rounded-lg transition-colors border border-purple-500/20">
         生产工作台

@@ -6,6 +6,7 @@ import { type StoryboardPromptConfig, getDefaultStoryboardConfig, buildFinalProm
 import { WorkbenchHeader } from './WorkbenchHeader';
 import { WorkflowSidebar } from './WorkflowSidebar';
 import { ProductionCanvasView } from './ProductionCanvasView';
+import { SHOT_KEYS_DESK, SHOT_KEYS_WALL, REF_COUNTS_DESK, REF_COUNTS_WALL } from '../lib/fixedWorkflowLayout';
 import { RightInspectorPanel } from './RightInspectorPanel';
 import { ProductionStatusSummary } from './ProductionStatusSummary';
 
@@ -28,7 +29,7 @@ interface ShotReferenceItem {
   fileName?: string; kind: 'fixed' | 'free'; status: 'ready' | 'missing'; order: number;
 }
 
-export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = ({ onSwitchToLegacy }) => {
+export const ProductionWorkbench: React.FC = () => {
   const [error, setError] = useState(''); const [loading, setLoading] = useState('');
   const [demoLog, setDemoLog] = useState<string[]>([]); const [productId, setProductId] = useState('');
   const [checklist, setChecklist] = useState<any>(null); const [templates, setTemplates] = useState<any[]>([]);
@@ -45,7 +46,25 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
   const [storyboardConfigs, setStoryboardConfigs] = useState<Record<string, StoryboardPromptConfig>>({});
   const [motionShotVersion, setMotionShotVersion] = useState<'primary' | 'backup'>('primary');
 	const [productLine, setProductLine] = useState<'desk_calendar' | 'wall_calendar'>('desk_calendar');
-	const [generatingShotKeys, setGeneratingShotKeys] = useState<string[]>([]);
+  // 10G-2: Optional size reference shot + per-shot batch counts
+  const [optionalShotEnabled, setOptionalShotEnabled] = useState(false);
+  const [shotBatchCounts, setShotBatchCounts] = useState<Record<string, number>>({});
+  const handleSetProductLine = useCallback((pl: 'desk_calendar' | 'wall_calendar') => {
+    if (pl === productLine) return;
+    setProductLine(pl);
+    setOptionalShotEnabled(false);
+    const newKeys = pl === 'wall_calendar' ? SHOT_KEYS_WALL : SHOT_KEYS_DESK;
+    const validTargets = new Set(newKeys.map(sk => `shot-control-node-${sk}`));
+    setManualEdges(prev => prev.filter(e => validTargets.has(e.target)));
+    setShotReferenceOrders(prev => {
+      const next: Record<string, string[]> = {};
+      newKeys.forEach(sk => { if (prev[sk]) next[sk] = prev[sk]; });
+      return next;
+    });
+    setRefImageUrls(prev => { Object.values(prev).forEach(url => { if (url?.startsWith("blob:")) URL.revokeObjectURL(url); }); return {}; });
+    setSelectedNodeId(newKeys[0]);
+  }, [productLine]);
+  const [generatingShotKeys, setGeneratingShotKeys] = useState<string[]>([]);
 	// 10D-1: Reference image node interactions — hover target via ref (no re-render)
 	const hoveredRefNodeIdRef = useRef<string | null>(null);
 	const setHoveredRefNodeId = useCallback((id: string | null) => { hoveredRefNodeIdRef.current = id; }, []);
@@ -59,10 +78,18 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
 	const [shotReferenceOrders, setShotReferenceOrders] = useState<Record<string, string[]>>({});
 
   // 10E: Derive per-shot reference lists from fixed + manual edges, 10F applies ordering
+  // 10G: Use productLine-dependent shot keys and ref counts
   const shotReferences = React.useMemo<Record<string, ShotReferenceItem[]>>(() => {
     const result: Record<string, ShotReferenceItem[]> = {};
-    const SHOT_KEYS = ['S01_main','S02_detail1','S03_detail2','S04_motion','S05_scene','S06_brand'];
-    const REF_COUNTS: Record<string,number> = {S01_main:1,S02_detail1:1,S03_detail2:1,S04_motion:2,S05_scene:1,S06_brand:1};
+    const isWall = productLine === 'wall_calendar';
+    const SHOT_KEYS = [
+      ...(isWall ? SHOT_KEYS_WALL : SHOT_KEYS_DESK),
+      ...(optionalShotEnabled ? (isWall ? ['W08_size_ref'] : ['S07_size_ref']) : []),
+    ];
+    const REF_COUNTS: Record<string,number> = {
+      ...(isWall ? REF_COUNTS_WALL : REF_COUNTS_DESK),
+      ...(optionalShotEnabled ? (isWall ? {W08_size_ref:1} : {S07_size_ref:1}) : {}),
+    };
     // Fixed ref nodes → their target shots (from fixedWorkflowLayout edges)
     SHOT_KEYS.forEach(sk => {
       result[sk] = [];
@@ -108,7 +135,7 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
       }
     });
     return result;
-  }, [refImageUrls, manualEdges, freeRefNodes, imageAssets, shotReferenceOrders]);
+  }, [refImageUrls, manualEdges, freeRefNodes, imageAssets, shotReferenceOrders, productLine, optionalShotEnabled]);
 
   const batchIdRef = useRef(''); const instanceRef = useRef<InstanceData | null>(null);
   useEffect(() => { batchIdRef.current = batchId; }, [batchId]);
@@ -235,8 +262,9 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
       const reference_images = readyRefs.map((r, i) => ({
         nodeId: r.sourceNodeId, imageAssetId: r.imageAssetId, url: r.imageUrl, fileName: r.fileName, kind: r.kind, order: i,
       }));
+      const batch_count = shotBatchCounts[shotKey] || 1;
       // Expose for test verification
-      if (typeof window !== 'undefined') (window as any).__lastGeneratePayload = { shotKey, nodeId, prompt, reference_images };
+      if (typeof window !== 'undefined') (window as any).__lastGeneratePayload = { shotKey, nodeId, prompt, reference_images, batch_count };
       const result = await api.generateVideoNode(nodeId, { prompt });
       setNodes(prev => prev.map(n => n.shot_key === shotKey ? { ...n, status: result.status, video_url: result.video_url, cover_url: result.cover_url } : n));
     } catch (e: any) { setError(e?.message || '生成失败'); }
@@ -471,7 +499,7 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
   return (
     <div data-testid="mvp3-workbench" className="flex flex-col h-screen bg-[#0a0f1a] text-gray-200 font-sans overflow-hidden">
       {/* Header — fixed height */}
-      <WorkbenchHeader modelAdapter={modelAdapter} onRunDemo={handleFullDemo} onReset={handleReset} loading={loading} onSwitchToLegacy={onSwitchToLegacy} onClearAllRefImages={handleClearAllFixedReferenceImages} />
+      <WorkbenchHeader modelAdapter={modelAdapter} adapters={adapters} onSetModelAdapter={setModelAdapter} onRunDemo={handleFullDemo} onReset={handleReset} loading={loading} onClearAllRefImages={handleClearAllFixedReferenceImages} />
 
       {/* Status Summary — fixed height */}
       <div className="flex-shrink-0 border-b border-white/5 bg-[#0d1117]">
@@ -495,8 +523,10 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
             onSetModelAdapter={setModelAdapter} onSetViewMode={setViewMode} onClearError={clearError}
             assets={assets} onUploadAssets={handleUploadAssets} onUpdateAssetRole={handleUpdateAssetRole}
             onSelectShot={(sk) => setSelectedNodeId(sk)} selectedShotKey={selectedNodeId}
-            productLine={productLine} onSetProductLine={setProductLine} motionShotVersion={motionShotVersion}
+            productLine={productLine} onSetProductLine={handleSetProductLine} motionShotVersion={motionShotVersion}
             nodes={nodes} imageAssets={imageAssets}
+            optionalShotEnabled={optionalShotEnabled}
+            onToggleOptionalShot={setOptionalShotEnabled}
           />
         </div>
 
@@ -511,6 +541,7 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
             onGenerateSingleShot={handleGenerateSingleShot}
             generatingShotKeys={generatingShotKeys}
             productLine={productLine}
+            optionalShotEnabled={optionalShotEnabled}
             connectingAssetId={connectingAssetId}
             onStartConnecting={setConnectingAssetId}
             onCancelConnecting={() => setConnectingAssetId(null)}
@@ -545,6 +576,8 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
             shotReferences={shotReferences}
             onMoveShotRefOrder={handleMoveShotRefOrder}
             onDragSortOrder={handleDragSortOrder}
+            shotBatchCounts={shotBatchCounts}
+            onSetShotBatchCount={(sk, n) => setShotBatchCounts(prev => ({ ...prev, [sk]: n }))}
           />
         </div>
       </div>

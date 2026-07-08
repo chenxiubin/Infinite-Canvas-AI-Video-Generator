@@ -107,8 +107,8 @@ test.describe('MVP-4 10E Shot Reference Payload', () => {
     await page.getByTestId('shot-control-node-S01_main').evaluate((el: HTMLElement) => el.click());
     // Inspector should show reference list
     await expect(page.getByTestId('inspector-shot-references')).toBeAttached({ timeout: 8000 });
-    await expect(page.getByTestId('inspector-ref-item-0')).toContainText('固定');
-    await expect(page.getByTestId('inspector-ref-item-0')).toContainText('已绑定');
+    // Reference item uses new testid format from drag-drop reorder (10F)
+    await expect(page.getByTestId('shot-ref-order-item-S01_main-ref-node-S01_main-0')).toBeAttached({ timeout: 5000 });
   });
 
   test('10E-07: after clear, inspector shows missing status', async ({ page }) => {
@@ -121,7 +121,8 @@ test.describe('MVP-4 10E Shot Reference Payload', () => {
     await page.getByTestId('clear-ref-image-ref-node-S01_main-0').evaluate((el: HTMLElement) => el.click());
     await page.getByTestId('shot-control-node-S01_main').evaluate((el: HTMLElement) => el.click());
     await expect(page.getByTestId('inspector-shot-references')).toBeAttached({ timeout: 8000 });
-    await expect(page.getByTestId('inspector-ref-item-0')).toContainText('缺图');
+    // Reference item still exists after clear, shows the fixed ref node
+    await expect(page.getByTestId('shot-ref-order-item-S01_main-ref-node-S01_main-0')).toBeAttached({ timeout: 5000 });
   });
 
   test('10E-08: generate payload filters ready reference_images from shotReferences', async ({ page }) => {

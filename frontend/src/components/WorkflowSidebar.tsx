@@ -19,6 +19,9 @@ interface Props {
   nodes?: any[];
   // 10D-2: Mock image asset library for display in assets module
   imageAssets?: { id: string; name: string; url: string; mimeType: string; createdAt: number; source: string }[];
+  // 10G-2: Optional size reference shot
+  optionalShotEnabled?: boolean;
+  onToggleOptionalShot?: (enabled: boolean) => void;
 }
 
 const SectionCard: React.FC<{ title: string; icon: React.ReactNode; children: React.ReactNode; testid?: string }> =
@@ -54,18 +57,14 @@ const ActionBtn: React.FC<{ testid?: string; onClick: () => void; disabled?: boo
     );
   };
 
-type SectionKey = 'productLine' | 'assets' | 'template' | 'batch' | 'model' | 'shots';
+type SectionKey = 'productLine' | 'assets';
 
 const SECTION_META: Record<SectionKey, { label: string; icon: React.FC<{ className?: string }> }> = {
   productLine: { label: '产品线', icon: Layers },
   assets: { label: '素材', icon: Image },
-  template: { label: '模板', icon: FileVideo },
-  batch: { label: '批次', icon: Package },
-  model: { label: '模型', icon: Cpu },
-  shots: { label: '分镜', icon: Eye },
 };
 
-const SECTION_ORDER: SectionKey[] = ['productLine', 'assets', 'template', 'batch', 'model', 'shots'];
+const SECTION_ORDER: SectionKey[] = ['productLine', 'assets'];
 
 export const WorkflowSidebar: React.FC<Props> = (p) => {
   // ── State ──
@@ -162,80 +161,56 @@ export const WorkflowSidebar: React.FC<Props> = (p) => {
             </div>
           )}
         </div>
+        {/* 10G-2: Optional size reference shot toggle */}
+        {p.onToggleOptionalShot && (
+          <div className="mt-2 border-t border-white/5 pt-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" data-testid="optional-shot-toggle"
+                checked={!!p.optionalShotEnabled}
+                onChange={e => p.onToggleOptionalShot?.(e.target.checked)}
+                className="w-3 h-3 rounded accent-purple-600" />
+              <span className="text-[9px] text-gray-400">备用分镜：尺寸参考同框</span>
+            </label>
+            <div className="text-[7px] text-gray-600 mt-0.5 ml-5">
+              用于展示产品尺寸比例、同框对比、空间参考
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 
   const renderAssets = () => (
     <div className="space-y-2">
-      <SectionCard title="产品素材包" icon={<Package className="w-3 h-3" />} testid="sidebar-section-product">
-        <ActionBtn testid="create-demo-product-button" onClick={p.onCreateDemo} color="purple" icon={<Play className="w-3 h-3" />}>创建演示产品</ActionBtn>
-        {p.productId && <div data-testid="product-id" className="text-gray-500 mt-1 text-[9px] truncate">{p.productId}</div>}
-        {p.isReady !== undefined && (
-          <div data-testid={p.isReady ? 'checklist-ready' : 'checklist-not-ready'}
-            className={`text-[10px] font-medium px-2 py-1 rounded-lg border ${p.isReady ? 'text-green-400 bg-green-900/20 border-green-500/20' : 'text-yellow-400 bg-yellow-900/20 border-yellow-500/20'}`}>
-            checklist: {p.isReady ? 'ready' : 'not ready'}
+      {/* 10G-3: Simplified — only the mock image library, no old upload/demo-product panels */}
+      <div data-testid="image-asset-library-panel" className="max-h-56 overflow-y-auto space-y-1">
+        {(p.imageAssets || []).length === 0 ? (
+          <div className="text-gray-500 text-[10px] text-center py-4 space-y-0.5">
+            <div>暂无图片素材</div>
+            <div className="text-[9px] text-gray-600">将图片拖入画布，或复制图片后 Ctrl+V 添加</div>
           </div>
-        )}
-      </SectionCard>
-      <SectionCard title="图片素材包" icon={<Image className="w-3 h-3" />} testid="sidebar-section-assets">
-        <div data-testid="asset-library-panel" className="space-y-1.5">
-          <label className="flex items-center justify-center gap-1.5 bg-purple-900/20 hover:bg-purple-900/40 text-purple-300 text-xs px-2.5 py-2 rounded-lg w-full cursor-pointer transition-colors border border-dashed border-purple-700/30">
-            <Upload className="w-3 h-3" /><span>上传图片素材</span>
-            <input data-testid="asset-upload-input" type="file" accept="image/*" multiple className="hidden"
-              onChange={e => { if (e.target.files && p.onUploadAssets) p.onUploadAssets(e.target.files); e.target.value = ''; }} />
-          </label>
-          {(p.assets || []).length === 0 ? (
-            <div className="text-gray-600 text-[10px] text-center py-2">暂无素材<br/>请先上传用于图生视频的参考图片</div>
-          ) : (
-            <div className="max-h-32 overflow-y-auto space-y-1">
-              {(p.assets || []).map(a => (
-                <div key={a.id} data-testid={`asset-card-${a.id}`} draggable onDragStart={e => { e.dataTransfer.setData('application/workbench-asset', JSON.stringify(a)); e.dataTransfer.effectAllowed = 'move'; }}
-                  className="flex items-center gap-2 bg-[#0a0f1a] border border-white/5 rounded-lg p-1.5 cursor-grab active:cursor-grabbing hover:border-purple-500/30 transition-colors">
-                  <img src={a.url} alt={a.filename} className="w-8 h-8 rounded object-cover flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[10px] text-gray-300 truncate">{a.filename}</div>
-                    <select value={a.role} onChange={e => p.onUpdateAssetRole?.(a.id, e.target.value)}
-                      className="bg-transparent text-[9px] text-gray-500 border-none p-0 focus:outline-none">
-                      <option value="product">产品图</option><option value="scene">场景图</option>
-                      <option value="start_frame">首帧图</option><option value="end_frame">尾帧图</option>
-                      <option value="reference">参考图</option><option value="logo">Logo</option>
-                    </select>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </SectionCard>
-      {/* 10D-2: Mock image library — shows images dropped on canvas or reference nodes */}
-      {(p.imageAssets || []).length > 0 && (
-        <SectionCard title="图片素材库" icon={<Image className="w-3 h-3" />} testid="sidebar-section-image-library">
-          <div data-testid="image-asset-library-panel" className="max-h-44 overflow-y-auto space-y-1">
-            {(p.imageAssets || []).map(a => (
-              <div key={a.id} data-testid={`image-asset-card-${a.id}`} draggable
-                onDragStart={e => {
-                  // Primary: assetId-based drag for library → free ReferenceImageNode
-                  e.dataTransfer.setData('application/workbench-image-asset', JSON.stringify({ assetId: a.id }));
-                  // Legacy: also set workbench-asset for backward compat with asset card drops
-                  e.dataTransfer.setData('application/workbench-asset', JSON.stringify({
-                    id: a.id, filename: a.name, url: a.url, role: 'reference', createdAt: a.createdAt, _assetId: a.id
-                  }));
-                  e.dataTransfer.effectAllowed = 'move';
-                }}
-                className="flex items-center gap-2 bg-[#0a0f1a] border border-white/5 rounded-lg p-1.5 cursor-grab active:cursor-grabbing hover:border-purple-500/30 transition-colors">
-                <img src={a.url} alt={a.name} className="w-8 h-8 rounded object-cover flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <div className="text-[10px] text-gray-300 truncate">{a.name}</div>
-                  <div className="text-[8px] text-gray-600">
-                    {a.source === 'drop-canvas' ? '画布拖入' : '节点拖入'} · {a.mimeType.split('/')[1] || a.mimeType}
-                  </div>
+        ) : (
+          (p.imageAssets || []).map(a => (
+            <div key={a.id} data-testid={`image-asset-card-${a.id}`} draggable
+              onDragStart={e => {
+                e.dataTransfer.setData('application/workbench-image-asset', JSON.stringify({ assetId: a.id }));
+                e.dataTransfer.setData('application/workbench-asset', JSON.stringify({
+                  id: a.id, filename: a.name, url: a.url, role: 'reference', createdAt: a.createdAt, _assetId: a.id
+                }));
+                e.dataTransfer.effectAllowed = 'move';
+              }}
+              className="flex items-center gap-2 bg-[#0a0f1a] border border-white/5 rounded-lg p-1.5 cursor-grab active:cursor-grabbing hover:border-purple-500/30 transition-colors">
+              <img src={a.url} alt={a.name} className="w-8 h-8 rounded object-cover flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="text-[10px] text-gray-300 truncate">{a.name}</div>
+                <div className="text-[8px] text-gray-600">
+                  {a.source === 'drop-canvas' ? '画布拖入' : a.source === 'paste-canvas' ? '粘贴' : '节点拖入'} · {a.mimeType.split('/')[1] || a.mimeType}
                 </div>
               </div>
-            ))}
-          </div>
-        </SectionCard>
-      )}
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 

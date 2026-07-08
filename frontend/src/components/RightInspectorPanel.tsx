@@ -41,6 +41,9 @@ interface Props {
   onMoveShotRefOrder?: (shotKey: string, sourceNodeId: string, direction: 'up' | 'down') => void;
   // 10F-2: Drag reorder — set full order array
   onDragSortOrder?: (shotKey: string, orderedIds: string[]) => void;
+  // 10G-2: Per-shot batch count
+  shotBatchCounts?: Record<string, number>;
+  onSetShotBatchCount?: (shotKey: string, count: number) => void;
 }
 
 const reviewBadgeCls: Record<string, string> = {
@@ -57,7 +60,7 @@ const statusBadgeCls: Record<string, string> = {
   failed: 'text-red-400 bg-red-900/30 border-red-500/30',
 };
 
-export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefresh, instance, modelAdapter, batchStatus, nodeCount, assets, selectedBinding, getBoundAsset, onBindShotFrame, onGenerateSingleShot, onRegenerateShot, onReviewAction, generatingShotKeys, storyboardConfigs, onUpdateStoryboardConfig, motionShotVersion, onSetMotionShotVersion, productLine, shotReferences, onMoveShotRefOrder, onDragSortOrder }) => {
+export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefresh, instance, modelAdapter, batchStatus, nodeCount, assets, selectedBinding, getBoundAsset, onBindShotFrame, onGenerateSingleShot, onRegenerateShot, onReviewAction, generatingShotKeys, storyboardConfigs, onUpdateStoryboardConfig, motionShotVersion, onSetMotionShotVersion, productLine, shotReferences, onMoveShotRefOrder, onDragSortOrder, shotBatchCounts, onSetShotBatchCount }) => {
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -183,6 +186,24 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
               </div>
             )}
 
+            {/* 10G-2: Generate batch count */}
+            {node.shot_key && onSetShotBatchCount && (
+              <div data-testid="inspector-batch-count" className="bg-[#0a0f1a] rounded-lg p-2.5 border border-white/5 space-y-1">
+                <div className="text-gray-400 text-[10px] font-medium">生成设置</div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] text-gray-500">生成批次</span>
+                  <select data-testid="batch-count-select"
+                    value={String((shotBatchCounts || {})[node.shot_key] || 1)}
+                    onChange={e => onSetShotBatchCount(node.shot_key, parseInt(e.target.value))}
+                    className="bg-[#0a0f1a] border border-white/10 rounded px-2 py-1 text-gray-200 text-[10px]">
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="4">4</option>
+                  </select>
+                </div>
+              </div>
+            )}
+
             {/* 分镜属性面板 */}
             {onUpdateStoryboardConfig && node.shot_key && (() => {
               const sk = node.shot_key;
@@ -261,100 +282,6 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
               );
             })()}
 
-            {/* 分镜素材绑定 */}
-            {onBindShotFrame && node.shot_key && (
-              <div className="bg-[#111827] border border-white/5 rounded-lg p-2.5 space-y-2">
-                <div data-testid="motion-shot-version-panel" className="bg-[#111827] border border-white/5 rounded-lg p-2.5 space-y-1.5">
-                <div className="text-gray-400 text-[10px] font-medium">S04 动态展示方案</div>
-                <div className="text-[8px] text-gray-600">该设置为模板级配置，影响当前模板下所有产品链</div>
-                <select value={motionShotVersion || 'primary'}
-                  onChange={e => onSetMotionShotVersion?.(e.target.value as 'primary' | 'backup')}
-                  className="bg-[#0a0f1a] border border-white/10 rounded px-2 py-1 text-gray-200 text-[10px] w-full">
-                  <option value="primary">主方案：翻页/动作定格</option>
-                  <option value="backup">备用方案：尺寸参考同框</option>
-                </select>
-                <div className="text-[8px] text-gray-500">
-                  {(motionShotVersion || 'primary') === 'primary'
-                    ? '提示词方向：中景，静止或极轻微平移运镜，捕捉动作定格瞬间的动感，轻微运动幅度'
-                    : '提示词方向：中景，产品与参照物同框展示尺寸对比，静止或轻微推进，轻微运动幅度'}
-                </div>
-              </div>
-              <div className="text-gray-400 text-[10px] font-medium">分镜素材绑定</div>
-                {/* 首帧 */}
-                {(() => {
-                  const sfAsset = getBoundAsset?.(selectedBinding?.startFrameAssetId);
-                  return sfAsset ? (
-                    <div data-testid="start-frame-preview" className="flex items-center gap-2 bg-[#0a0f1a] rounded-lg p-1.5">
-                      <img src={sfAsset.url} className="w-10 h-10 rounded object-cover" />
-                      <div className="flex-1 min-w-0"><div className="text-[10px] text-green-400">首帧已绑定</div><div className="text-[8px] text-green-600">已持久化 · 图生视频首帧输入</div></div>
-                      <button onClick={() => onBindShotFrame(node.shot_key, 'startFrame', null)}
-                        className="text-red-400 text-[9px] hover:underline">解绑</button>
-                    </div>
-                  ) : (
-                    <div className="space-y-1">
-                      <div className="text-[10px] text-amber-400 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> 未绑定首帧图</div>
-                      {assets && assets.length > 0 ? (
-                        <select data-testid="bind-start-frame-select" value="" onChange={e => { if (e.target.value) onBindShotFrame(node.shot_key, 'startFrame', e.target.value); }}
-                          className="bg-[#0a0f1a] border border-white/10 rounded px-2 py-1 text-gray-300 text-[10px] w-full">
-                          <option value="">选择首帧图...</option>
-                          {assets.filter(a => a.role === 'start_frame' || a.role === 'product').map(a => <option key={a.id} value={a.id}>{a.filename}</option>)}
-                        </select>
-                      ) : <div className="text-gray-600 text-[9px]">请先在左侧素材包上传图片</div>}
-                    </div>
-                  );
-                })()}
-                {/* 尾帧 */}
-                {(() => {
-                  const efAsset = getBoundAsset?.(selectedBinding?.endFrameAssetId);
-                  return efAsset ? (
-                    <div data-testid="end-frame-preview" className="flex items-center gap-2 bg-[#0a0f1a] rounded-lg p-1.5">
-                      <img src={efAsset.url} className="w-10 h-10 rounded object-cover" />
-                      <div className="flex-1 min-w-0 text-[10px] text-green-400">尾帧已绑定</div>
-                      <button onClick={() => onBindShotFrame(node.shot_key, 'endFrame', null)}
-                        className="text-red-400 text-[9px] hover:underline">解绑</button>
-                    </div>
-                  ) : (
-                    <div className="space-y-1">
-                      <div className="text-[10px] text-gray-500">尾帧图（可选 · 本地暂存）</div>
-                      {assets && assets.length > 0 ? (
-                        <select data-testid="bind-end-frame-select" value="" onChange={e => { if (e.target.value) onBindShotFrame(node.shot_key, 'endFrame', e.target.value); }}
-                          className="bg-[#0a0f1a] border border-white/10 rounded px-2 py-1 text-gray-300 text-[10px] w-full">
-                          <option value="">选择尾帧图...</option>
-                          {assets.filter(a => a.role === 'end_frame' || a.role === 'logo' || a.role === 'product').map(a => <option key={a.id} value={a.id}>{a.filename}</option>)}
-                        </select>
-                      ) : null}
-                    </div>
-                  );
-                })()}
-                {/* 参考图 */}
-                {(() => {
-                  const refAssets = (selectedBinding?.referenceAssetIds || []).map(id => getBoundAsset?.(id)).filter(Boolean) as WorkbenchAsset[];
-                  return refAssets.length > 0 ? (
-                    <div data-testid="reference-image-preview" className="space-y-1">
-                      <div className="text-[10px] text-green-400">参考图已绑定（本地暂存） ({refAssets.length}张)</div>
-                      {refAssets.map(a => (
-                        <div key={a.id} className="flex items-center gap-2 bg-[#0a0f1a] rounded-lg p-1.5">
-                          <img src={a.url} className="w-8 h-8 rounded object-cover" />
-                          <span className="text-[9px] text-gray-400 truncate">{a.filename}</span>
-                          <button onClick={() => onBindShotFrame(node.shot_key, 'reference', null)}
-                            className="text-red-400 text-[9px] hover:underline ml-auto">解绑</button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <select data-testid="bind-reference-select" value="" onChange={e => { if (e.target.value) onBindShotFrame(node.shot_key, 'reference', e.target.value); }}
-                      className="bg-[#0a0f1a] border border-white/10 rounded px-2 py-1 text-gray-500 text-[10px] w-full">
-                      <option value="">绑定参考图...</option>
-                      {(assets || []).map(a => <option key={a.id} value={a.id}>{a.filename}</option>)}
-                    </select>
-                  );
-                })()}
-                {!selectedBinding?.startFrameAssetId && (
-                  <div data-testid="frame-binding-warning" className="text-amber-400 text-[9px]">请先为该分镜绑定首帧图</div>
-                )}
-              </div>
-            )}
-
             {node.video_url && (
               <div className="bg-[#0a0f1a] rounded-lg p-2.5 border border-white/5">
                 <div className="text-gray-600 text-[10px] mb-1">视频预览</div>
@@ -415,9 +342,7 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
               <div className="space-y-1.5">
                 {node.status === 'pending' && onGenerateSingleShot && (
                   <>
-                    {!selectedBinding?.startFrameAssetId ? (
-                      <div data-testid="single-shot-generate-disabled-reason" className="text-amber-400 text-[9px] text-center">请先绑定首帧图</div>
-                    ) : generatingShotKeys?.includes(node.shot_key) ? (
+                    {generatingShotKeys?.includes(node.shot_key) ? (
                       <div data-testid="single-shot-generating-status" className="flex items-center justify-center gap-1.5 text-blue-400 text-[10px] py-1">
                         <Loader2 className="w-3 h-3 animate-spin" /> 生成中...
                       </div>

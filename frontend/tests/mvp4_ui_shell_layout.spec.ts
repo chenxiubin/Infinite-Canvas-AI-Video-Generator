@@ -58,7 +58,8 @@ test.describe('MVP-4 UI Shell Layout', () => {
     // 4. Hover assets icon → panel switches to "产品素材包"
     await page.getByTestId('sidebar-icon-assets').hover();
     await expect(panel).toBeVisible({ timeout: 3000 });
-    await expect(page.getByTestId('sidebar-section-product')).toBeVisible({ timeout: 5000 });
+    // Verify image asset library panel is accessible in the expanded panel
+    await expect(page.getByTestId('image-asset-library-panel')).toBeAttached({ timeout: 5000 });
 
     // 5. Move mouse into panel → stays open
     await panel.hover();

@@ -36,15 +36,21 @@ test.describe('MVP-4 Fixed Workflow Layout', () => {
     expect(totalRefEdges).toBeGreaterThanOrEqual(1);
   });
 
-  test('M4-FixedLayout-03: switch to wall calendar shows wall layout', async ({ page }) => {
+  test('M4-FixedLayout-03: switch to wall calendar shows wall-specific shot keys', async ({ page }) => {
     test.setTimeout(30000);
-    // Hover product-line icon to open the localised module panel
     await page.getByTestId('sidebar-icon-productLine').hover();
     await expect(page.getByTestId('workflow-sidebar-expanded')).toBeVisible({ timeout: 5000 });
     await page.getByTestId('product-line-wall-calendar').click();
     await expect(page.getByTestId('current-product-line-label')).toContainText('挂历', { timeout: 5000 });
-    await expect(page.getByTestId('shot-control-node-S01_main')).toBeAttached({ timeout: 10000 });
-    await expect(page.getByTestId('fixed-video-node-S05_scene')).toBeAttached({ timeout: 8000 });
+    // Wall calendar shows different shot keys (W01 instead of S01)
+    await expect(page.getByTestId('shot-control-node-W01_main')).toBeAttached({ timeout: 10000 });
+    await expect(page.getByTestId('shot-control-node-W02_hanging')).toBeAttached({ timeout: 10000 });
+    // Desk calendar keys should NOT be present
+    await expect(page.getByTestId('shot-control-node-S01_main')).toBeHidden({ timeout: 5000 });
+    // Edge count should be different (7 shots vs 6)
+    await page.waitForSelector('.react-flow__edge', { timeout: 8000 });
+    const edgeCount = await page.locator('.react-flow__edge').count();
+    expect(edgeCount).toBeGreaterThanOrEqual(1);
   });
 
   test('M4-FixedLayout-04: click shot control node opens Inspector', async ({ page }) => {

@@ -6,8 +6,6 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Package } from 'lucide-react';
-import { VideoPreviewNode } from './VideoPreviewNode';
-import { deriveVideoPreviewNodes } from '../lib/videoPreviewNodes';
 import { ReferenceImageNode } from './ReferenceImageNode';
 import { ShotControlNode } from './ShotControlNode';
 import { FixedVideoResultNode } from './FixedVideoResultNode';
@@ -61,6 +59,8 @@ interface Props {
   onDropAssetToRefNode?: (nodeId: string, assetId: string) => void;
   // 10E: Per-shot reference lists
   shotReferences?: Record<string, any[]>;
+  // 10G-2: Optional size reference shot
+  optionalShotEnabled?: boolean;
 }
 
 const DEFAULT_SHOTS = [
@@ -129,7 +129,7 @@ const MaterialEdge: React.FC<{ id: string; sourceX: number; sourceY: number; tar
   };
 
 const edgeTypes: EdgeTypes = { materialEdge: MaterialEdge };
-const shotNodeTypes: NodeTypes = { workbenchShot: WorkbenchShotNode, workbenchVideoPreview: VideoPreviewNode, referenceImageNode: ReferenceImageNode, shotControlNode: ShotControlNode, fixedVideoResultNode: FixedVideoResultNode, mergeNode: MergeNode };
+const shotNodeTypes: NodeTypes = { referenceImageNode: ReferenceImageNode, shotControlNode: ShotControlNode, fixedVideoResultNode: FixedVideoResultNode, mergeNode: MergeNode };
 
 // ==== Toolbar inside ReactFlow ====
 const CanvasToolbar: React.FC<{ instance: any; noData: boolean; connectingAssetId?: string | null; onCancelConnecting?: () => void }> = ({ instance, noData, connectingAssetId, onCancelConnecting }) => {
@@ -148,7 +148,7 @@ const CanvasToolbar: React.FC<{ instance: any; noData: boolean; connectingAssetI
   </div>);
 };
 
-export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefresh, onSelectNode, assets, shotBindings, onConnectBinding, onDeleteBinding, connectingAssetId, onStartConnecting, onCancelConnecting, onRegenerateShot, onGenerateSingleShot, generatingShotKeys, productLine, onHoverRefNode, onDropImageToRefNode, onDropImageToCanvas, refImageUrls, freeRefNodes, imageAssets, onDeleteFreeRefNode, onCanvasMouseMove, manualEdges, onManualEdgeCreate, onCreateFreeFromLibraryAsset, onManualFreeNodeFromAsset, onClearRefNodeImage, onDropAssetToRefNode, shotReferences }) => {
+export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefresh, onSelectNode, assets, shotBindings, onConnectBinding, onDeleteBinding, connectingAssetId, onStartConnecting, onCancelConnecting, onRegenerateShot, onGenerateSingleShot, generatingShotKeys, productLine, onHoverRefNode, onDropImageToRefNode, onDropImageToCanvas, refImageUrls, freeRefNodes, imageAssets, onDeleteFreeRefNode, onCanvasMouseMove, manualEdges, onManualEdgeCreate, onCreateFreeFromLibraryAsset, onManualFreeNodeFromAsset, onClearRefNodeImage, onDropAssetToRefNode, shotReferences, optionalShotEnabled }) => {
   const noData = !instance || nodes.length === 0;
 
   // Shot data is sourced from the nodes/shotBindings props; visual nodes are produced by produceFixedLayout below.
@@ -171,29 +171,9 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
     return es;
   }, [shotBindings, handleEdgeDelete]);
 
-  // Derive video preview nodes from shot nodes that have video_url
-  const videoPreviewResult = useMemo(() => {
-    const shots = (nodes.length > 0 ? nodes : DEFAULT_SHOTS.map(s => ({ ...s, status: 'pending', review_status: '-', video_url: undefined })));
-    const positions: Record<string, { x: number; y: number }> = {};
-    shots.forEach((s, i) => { positions[s.shot_key] = { x: i * 200, y: 60 }; });
-    const raw = deriveVideoPreviewNodes(shots as any, positions);
-    return {
-      nodes: raw.nodes.map(n => ({
-        ...n,
-        data: { ...n.data, onRegenerate: (d: any) => {
-          const node = nodes.find(nn => nn.shot_key === d.shot_key);
-          if (node?.node_id) onRegenerateShot?.(node.node_id, d.shot_key);
-        }},
-      })),
-      edges: raw.edges,
-    };
-  }, [nodes, onRegenerateShot]);
-  const videoPreviewNodes = videoPreviewResult.nodes;
-  const videoPreviewEdges = videoPreviewResult.edges;
-
   // Generate fixed workflow layout nodes and edges (productLine-dependent)
   const fixedLayout = useMemo(() => {
-    const raw = produceFixedLayout(productLine || 'desk_calendar');
+    const raw = produceFixedLayout(productLine || 'desk_calendar', optionalShotEnabled);
     return {
       nodes: raw.nodes.map(n => {
         if (n.type === 'shotControlNode') {
@@ -235,7 +215,7 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
       }),
       edges: raw.edges,
     };
-  }, [productLine, nodes, shotBindings, onSelectNode, onGenerateSingleShot, generatingShotKeys, connectingAssetId, onConnectBinding, onDropImageToRefNode, refImageUrls, onClearRefNodeImage, onDropAssetToRefNode, shotReferences]);
+  }, [productLine, nodes, shotBindings, onSelectNode, onGenerateSingleShot, generatingShotKeys, connectingAssetId, onConnectBinding, onDropImageToRefNode, refImageUrls, onClearRefNodeImage, onDropAssetToRefNode, shotReferences, optionalShotEnabled]);
 
   // 10D-2: Build free reference nodes (dropped on canvas blank area)
   const freeRefNodesRf: RFNode[] = useMemo(() => (freeRefNodes || []).map(frn => {
@@ -261,8 +241,8 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
     };
   }), [freeRefNodes, imageAssets, productLine, onHoverRefNode, onDropImageToRefNode, onDeleteFreeRefNode]);
 
-  const allNodes = useMemo(() => [...fixedLayout.nodes, ...videoPreviewNodes, ...freeRefNodesRf], [fixedLayout.nodes, videoPreviewNodes, freeRefNodesRf]);
-  const allEdges = useMemo(() => [...fixedLayout.edges, ...bindingEdges, ...videoPreviewEdges, ...(manualEdges || [])], [fixedLayout.edges, bindingEdges, videoPreviewEdges, manualEdges]);
+  const allNodes = useMemo(() => [...fixedLayout.nodes, ...freeRefNodesRf], [fixedLayout.nodes, freeRefNodesRf]);
+  const allEdges = useMemo(() => [...fixedLayout.edges, ...bindingEdges, ...(manualEdges || [])], [fixedLayout.edges, bindingEdges, manualEdges]);
 
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState(allNodes);
 
@@ -318,7 +298,7 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
         sourceHandle: 'source',
         targetHandle: 'target',
         type: 'default',
-        style: { stroke: '#8b5cf6', strokeWidth: 1.8 },
+        style: { stroke: '#8b5cf6', strokeWidth: 1.6, opacity: 0.7 },
       });
       return;
     }

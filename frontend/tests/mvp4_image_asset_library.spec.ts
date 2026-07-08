@@ -28,7 +28,8 @@ test.describe('MVP-4 10D-2 Image Asset Library', () => {
     await expect(page.getByTestId('workflow-sidebar-expanded')).toBeVisible({ timeout: 5000 });
 
     // The image library section should now show the dropped image
-    await expect(page.getByTestId('sidebar-section-image-library')).toBeAttached({ timeout: 5000 });
+    // Image library panel is now the main content of the assets module
+    await expect(page.getByTestId('image-asset-library-panel')).toBeVisible({ timeout: 5000 });
     await expect(page.getByTestId('image-asset-library-panel')).toBeVisible({ timeout: 3000 });
   });
 
