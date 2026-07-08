@@ -22,6 +22,12 @@ interface ImageAsset { id: string; name: string; url: string; mimeType: string; 
 // 10D-2: Free-standing reference image node (not part of fixed layout)
 interface FreeRefNode { id: string; imageAssetId: string; position: { x: number; y: number }; }
 
+// 10E: Per-shot reference image list derived from canvas connections
+interface ShotReferenceItem {
+  id: string; sourceNodeId: string; imageAssetId?: string; imageUrl?: string;
+  fileName?: string; kind: 'fixed' | 'free'; status: 'ready' | 'missing'; order: number;
+}
+
 export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = ({ onSwitchToLegacy }) => {
   const [error, setError] = useState(''); const [loading, setLoading] = useState('');
   const [demoLog, setDemoLog] = useState<string[]>([]); const [productId, setProductId] = useState('');
@@ -49,6 +55,42 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
 	const [freeRefNodes, setFreeRefNodes] = useState<FreeRefNode[]>([]);
 	// Manual edges created by user dragging between handles (separate from fixed layout edges)
 	const [manualEdges, setManualEdges] = useState<any[]>([]);
+
+  // 10E: Derive per-shot reference lists from fixed + manual edges
+  const shotReferences = React.useMemo<Record<string, ShotReferenceItem[]>>(() => {
+    const result: Record<string, ShotReferenceItem[]> = {};
+    const SHOT_KEYS = ['S01_main','S02_detail1','S03_detail2','S04_motion','S05_scene','S06_brand'];
+    const REF_COUNTS: Record<string,number> = {S01_main:1,S02_detail1:1,S03_detail2:1,S04_motion:2,S05_scene:1,S06_brand:1};
+    // Fixed ref nodes → their target shots (from fixedWorkflowLayout edges)
+    SHOT_KEYS.forEach(sk => {
+      result[sk] = [];
+      const refCount = REF_COUNTS[sk] || 1;
+      for (let ri = 0; ri < refCount; ri++) {
+        const nodeId = `ref-node-${sk}-${ri}`;
+        const url = refImageUrls[nodeId];
+        result[sk].push({
+          id: `fixed-${sk}-${ri}`, sourceNodeId: nodeId,
+          imageUrl: url || undefined, fileName: url ? `固定参考图 ${ri+1}` : undefined,
+          kind: 'fixed', status: url ? 'ready' : 'missing', order: ri,
+        });
+      }
+    });
+    // Free reference nodes → their target shots (from manualEdges)
+    manualEdges.forEach((edge, ei) => {
+      const targetShotKey = edge.target?.startsWith('shot-control-node-') ? edge.target.replace('shot-control-node-', '') : null;
+      if (!targetShotKey || !result[targetShotKey]) return;
+      const frn = freeRefNodes.find(f => f.id === edge.source);
+      if (!frn) return;
+      const asset = imageAssets.find(a => a.id === frn.imageAssetId);
+      result[targetShotKey].push({
+        id: `free-${frn.id}`, sourceNodeId: frn.id,
+        imageAssetId: frn.imageAssetId, imageUrl: asset?.url, fileName: asset?.name || asset?.fileName,
+        kind: 'free', status: asset?.url ? 'ready' : 'missing',
+        order: (REF_COUNTS[targetShotKey] || 1) + ei,
+      });
+    });
+    return result;
+  }, [refImageUrls, manualEdges, freeRefNodes, imageAssets]);
 
   const batchIdRef = useRef(''); const instanceRef = useRef<InstanceData | null>(null);
   useEffect(() => { batchIdRef.current = batchId; }, [batchId]);
@@ -169,6 +211,13 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
     try {
       const config = (storyboardConfigs || {})[shotKey] || getDefaultStoryboardConfig(shotKey, productLine, motionShotVersion);
       const prompt = buildFinalPrompt(config);
+      // 10E: Include ready reference images in generate payload
+      const refs = (shotReferences || {})[shotKey] || [];
+      const reference_images = refs.filter(r => r.status === 'ready').map(r => ({
+        nodeId: r.sourceNodeId, imageAssetId: r.imageAssetId, url: r.imageUrl, fileName: r.fileName, kind: r.kind, order: r.order,
+      }));
+      // Expose for test verification
+      if (typeof window !== 'undefined') (window as any).__lastGeneratePayload = { shotKey, nodeId, prompt, reference_images };
       const result = await api.generateVideoNode(nodeId, { prompt });
       setNodes(prev => prev.map(n => n.shot_key === shotKey ? { ...n, status: result.status, video_url: result.video_url, cover_url: result.cover_url } : n));
     } catch (e: any) { setError(e?.message || '生成失败'); }
@@ -424,6 +473,7 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
             onManualEdgeCreate={(edge: any) => setManualEdges(prev => [...prev, edge])}
             onCreateFreeFromLibraryAsset={handleCreateFreeFromLibraryAsset}
             onManualFreeNodeFromAsset={handleManualFreeNodeFromAsset}
+            shotReferences={shotReferences}
           />
         </main>
 
@@ -436,7 +486,9 @@ export const ProductionWorkbench: React.FC<{ onSwitchToLegacy?: () => void }> = 
             motionShotVersion={motionShotVersion} onSetMotionShotVersion={setMotionShotVersion}
             onGenerateSingleShot={handleGenerateSingleShot} onRegenerateShot={handleRegenerateShot}
             generatingShotKeys={generatingShotKeys} productLine={productLine}
-            onReviewAction={handleReviewAction} />
+            onReviewAction={handleReviewAction}
+            shotReferences={shotReferences}
+          />
         </div>
       </div>
     </div>

@@ -35,6 +35,8 @@ interface Props {
   onUpdateStoryboardConfig?: (shotKey: string, config: StoryboardPromptConfig) => void;
   motionShotVersion?: 'primary' | 'backup';
   onSetMotionShotVersion?: (v: 'primary' | 'backup') => void;
+  // 10E: Per-shot reference lists
+  shotReferences?: Record<string, any[]>;
 }
 
 const reviewBadgeCls: Record<string, string> = {
@@ -51,7 +53,7 @@ const statusBadgeCls: Record<string, string> = {
   failed: 'text-red-400 bg-red-900/30 border-red-500/30',
 };
 
-export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefresh, instance, modelAdapter, batchStatus, nodeCount, assets, selectedBinding, getBoundAsset, onBindShotFrame, onGenerateSingleShot, onRegenerateShot, onReviewAction, generatingShotKeys, storyboardConfigs, onUpdateStoryboardConfig, motionShotVersion, onSetMotionShotVersion, productLine }) => {
+export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefresh, instance, modelAdapter, batchStatus, nodeCount, assets, selectedBinding, getBoundAsset, onBindShotFrame, onGenerateSingleShot, onRegenerateShot, onReviewAction, generatingShotKeys, storyboardConfigs, onUpdateStoryboardConfig, motionShotVersion, onSetMotionShotVersion, productLine, shotReferences }) => {
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -118,6 +120,34 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
               <div><div className="text-gray-600 mb-0.5">时长</div><div className="text-gray-300">{node.duration_seconds}秒</div></div>
               <div><div className="text-gray-600 mb-0.5">bound_asset_source</div><div className="text-gray-500 truncate">{node.bound_asset_source || '-'}</div></div>
             </div>
+
+            {/* 10E: Reference image list for this shot */}
+            {node.shot_key && shotReferences && shotReferences[node.shot_key] && (
+              <div data-testid="inspector-shot-references" className="bg-[#0a0f1a] rounded-lg p-2.5 border border-white/5 space-y-1">
+                <div className="text-gray-400 text-[10px] font-medium">参考图列表</div>
+                <div className="text-[9px] text-gray-500">
+                  共 {shotReferences[node.shot_key].length} 张 · ready {shotReferences[node.shot_key].filter((r: any) => r.status === 'ready').length}
+                </div>
+                {(() => {
+                  const refs = shotReferences[node.shot_key];
+                  const total = refs.length;
+                  const useRefLabels = total > 2;
+                  return refs.map((ref: any, i: number) => (
+                    <div key={ref.id} data-testid={`inspector-ref-item-${i}`} className="flex items-center gap-2 text-[9px]">
+                      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${ref.status === 'ready' ? 'bg-green-400' : 'bg-amber-500'}`} />
+                      <span className="text-gray-500 w-5 flex-shrink-0">
+                        {useRefLabels ? `R${i+1}` : (i === 0 ? '首帧' : '尾帧')}
+                      </span>
+                      <span className="text-gray-400">{ref.kind === 'fixed' ? '固定' : '自由'}</span>
+                      <span className="text-gray-300 truncate flex-1">{ref.fileName || ref.sourceNodeId}</span>
+                      <span className={`text-[8px] ${ref.status === 'ready' ? 'text-green-500' : 'text-amber-500'}`}>
+                        {ref.status === 'ready' ? '已绑定' : '缺图'}
+                      </span>
+                    </div>
+                  ));
+                })()}
+              </div>
+            )}
 
             {/* 分镜属性面板 */}
             {onUpdateStoryboardConfig && node.shot_key && (() => {

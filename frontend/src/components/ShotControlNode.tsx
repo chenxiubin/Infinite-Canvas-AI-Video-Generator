@@ -16,6 +16,8 @@ interface Props {
     onConnectBinding?: (shotKey: string, frameType: string, assetId: string) => void;
     nodeStatus?: string;
     nodeReviewStatus?: string;
+    // 10E: Derived reference images for this shot
+    shotReferences?: { id: string; sourceNodeId: string; imageUrl?: string; fileName?: string; kind: string; status: string; order: number }[];
   };
 }
 
@@ -45,8 +47,40 @@ export const ShotControlNode: React.FC<Props> = ({ data }) => {
 
       <div className="text-xs font-semibold text-gray-200 truncate">{sk}</div>
       <div className="text-[9px] text-gray-500 mt-0.5">{data.shot_name}</div>
-      <div data-testid={`shot-control-reference-strip-${sk}`} className="flex gap-1 mt-2">
-        <div className="w-8 h-10 bg-[#0a0f1a] rounded border border-white/5 flex items-center justify-center text-[7px] text-gray-700">参考图</div>
+      {/* 10E: Dynamic reference strip from shotReferences */}
+      <div data-testid={`shot-control-reference-strip-${sk}`} className="flex gap-1 mt-2 flex-wrap">
+        {(() => {
+          const refs = (data as any).shotReferences || [] as any[];
+          const ready = refs.filter((r: any) => r.status === 'ready');
+          if (ready.length === 0) {
+            return <div className="w-8 h-10 bg-[#0a0f1a] rounded border border-white/5 flex items-center justify-center text-[7px] text-gray-600">缺图</div>;
+          }
+          const maxShow = 2;
+          return (
+            <>
+              {ready.slice(0, maxShow).map((r: any, i: number) => (
+                <div key={r.id} data-testid={`shot-ref-thumb-${sk}-${i}`} className="w-8 h-10 bg-[#0a0f1a] rounded border border-white/5 flex items-center justify-center overflow-hidden relative group">
+                  {r.imageUrl ? (
+                    <img src={r.imageUrl} className="w-full h-full object-cover" alt={r.fileName || ''} />
+                  ) : (
+                    <span className="text-[7px] text-gray-700">IMG</span>
+                  )}
+                  <span className="absolute bottom-0 left-0 right-0 text-[5px] text-gray-400 bg-black/50 text-center truncate px-0.5">
+                    {ready.length <= 2
+                      ? (i === 0 ? '首帧' : '尾帧')
+                      : `参考图 ${i+1}`
+                    }
+                  </span>
+                </div>
+              ))}
+              {ready.length > maxShow && (
+                <div data-testid={`shot-ref-extra-${sk}`} className="w-8 h-10 bg-[#0a0f1a] rounded border border-white/5 flex items-center justify-center text-[7px] text-purple-400">
+                  +{ready.length - maxShow}
+                </div>
+              )}
+            </>
+          );
+        })()}
       </div>
       <div className="flex items-center justify-between mt-2">
         <span data-testid={`shot-control-status-${sk}`} className="text-[8px] text-gray-500">{generating ? '生成中...' : disabled ? disabledReason : '待生成'}</span>
