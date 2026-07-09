@@ -100,3 +100,5 @@ export const SHOT_KEYS_DESK = DESK_KEYS;
 export const SHOT_KEYS_WALL = WALL_KEYS;
 export const REF_COUNTS_DESK = DESK_REF;
 export const REF_COUNTS_WALL = WALL_REF;
+export const SHOT_NAMES_DESK = DESK_NAMES;
+export const SHOT_NAMES_WALL = WALL_NAMES;

@@ -29,9 +29,8 @@ test.describe('MVP-4 Fixed Workflow Layout', () => {
     test.setTimeout(30000);
     await expect(page.getByTestId('reference-image-node-S04_motion-0')).toBeAttached({ timeout: 10000 });
     await expect(page.getByTestId('reference-image-node-S04_motion-1')).toBeAttached({ timeout: 10000 });
-    // Verify edges: S04 should have 2 ref edges (one per reference node)
-    const s04RefEdges = page.locator('.react-flow__edge[data-testid="rf__edge-ref-edge-S04_motion-0"], .react-flow__edge[data-testid="rf__edge-ref-edge-S04_motion-1"]');
-    // Verify at least 1 edge exists (React Flow v12 renders edges in SVG)
+    // Wait for React Flow edges to be attached in DOM before counting
+    await page.locator('.react-flow__edge').first().waitFor({ state: 'attached', timeout: 8000 });
     const totalRefEdges = await page.locator('.react-flow__edge').count();
     expect(totalRefEdges).toBeGreaterThanOrEqual(1);
   });

@@ -47,6 +47,10 @@ interface Props {
   // 10I: Video asset library for video preview
   videoAssetsByShot?: Record<string, any[]>;
   currentVideoByShot?: Record<string, string>;
+  // 10J: Composition director
+  canMerge?: boolean;
+  mergeStatus?: string;
+  onOpenDirector?: () => void;
 }
 
 const reviewBadgeCls: Record<string, string> = {
@@ -63,7 +67,7 @@ const statusBadgeCls: Record<string, string> = {
   failed: 'text-red-400 bg-red-900/30 border-red-500/30',
 };
 
-export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefresh, instance, modelAdapter, batchStatus, nodeCount, assets, selectedBinding, getBoundAsset, onBindShotFrame, onGenerateSingleShot, onRegenerateShot, onReviewAction, generatingShotKeys, storyboardConfigs, onUpdateStoryboardConfig, motionShotVersion, onSetMotionShotVersion, productLine, shotReferences, onMoveShotRefOrder, onDragSortOrder, shotBatchCounts, onSetShotBatchCount, videoAssetsByShot, currentVideoByShot }) => {
+export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefresh, instance, modelAdapter, batchStatus, nodeCount, assets, selectedBinding, getBoundAsset, onBindShotFrame, onGenerateSingleShot, onRegenerateShot, onReviewAction, generatingShotKeys, storyboardConfigs, onUpdateStoryboardConfig, motionShotVersion, onSetMotionShotVersion, productLine, shotReferences, onMoveShotRefOrder, onDragSortOrder, shotBatchCounts, onSetShotBatchCount, videoAssetsByShot, currentVideoByShot, canMerge, mergeStatus, onOpenDirector }) => {
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -297,6 +301,34 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
               );
               return null;
             })()}
+            {/* 10J: Composition director section (shown when merge node is selected) */}
+            {node?.shot_key === 'merge-node' && (
+              <div data-testid="inspector-composition-director"
+                   className="flex-shrink-0 mx-3 mb-3 bg-[#111827] border border-white/5 rounded-lg p-2.5 space-y-2">
+                <div className="text-gray-400 text-[10px] font-medium">总合成导演台</div>
+                <div className="text-gray-500 text-[9px]">
+                  状态: <span className={canMerge ? 'text-green-400' : 'text-amber-400'}>
+                    {mergeStatus || '等待全部通过'}
+                  </span>
+                </div>
+                {!canMerge && (
+                  <div className="text-[8px] text-gray-600">
+                    还有分镜未通过审核，导演台将以当前已通过片段打开
+                  </div>
+                )}
+                <button
+                  data-testid="inspector-open-director"
+                  onClick={onOpenDirector}
+                  className={`w-full text-[10px] rounded-lg px-3 py-2 font-medium transition-colors ${
+                    canMerge
+                      ? 'bg-purple-800/40 text-purple-300 hover:bg-purple-700/50 border border-purple-700/20'
+                      : 'bg-purple-900/20 text-purple-400/60 hover:bg-purple-800/30 border border-purple-700/10'
+                  }`}
+                >
+                  打开总合成导演台
+                </button>
+              </div>
+            )}
             {node.video_url && !(currentVideoByShot || {})[node.shot_key] && (
               <div className="bg-[#0a0f1a] rounded-lg p-2.5 border border-white/5">
                 <div className="text-gray-600 text-[10px] mb-1">视频预览</div>

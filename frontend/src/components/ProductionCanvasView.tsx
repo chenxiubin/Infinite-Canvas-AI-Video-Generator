@@ -64,6 +64,9 @@ interface Props {
   // 10I: Video asset library
   videoAssetsByShot?: Record<string, any[]>;
   currentVideoByShot?: Record<string, string>;
+  // 10J: Composition director
+  onOpenDirector?: () => void;
+  compositionPlan?: { segments?: any[] } | null;
 }
 
 // ==== Custom Edge: MaterialEdge with color/label by binding_type ====
@@ -99,7 +102,7 @@ const CanvasToolbar: React.FC<{ instance: any; noData: boolean; connectingAssetI
   </div>);
 };
 
-export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefresh, onSelectNode, assets, shotBindings, onConnectBinding, onDeleteBinding, connectingAssetId, onStartConnecting, onCancelConnecting, onRegenerateShot, onGenerateSingleShot, generatingShotKeys, productLine, onHoverRefNode, onDropImageToRefNode, onDropImageToCanvas, refImageUrls, freeRefNodes, imageAssets, onDeleteFreeRefNode, onCanvasMouseMove, manualEdges, onManualEdgeCreate, onCreateFreeFromLibraryAsset, onManualFreeNodeFromAsset, onClearRefNodeImage, onDropAssetToRefNode, shotReferences, optionalShotEnabled, videoAssetsByShot, currentVideoByShot }) => {
+export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefresh, onSelectNode, assets, shotBindings, onConnectBinding, onDeleteBinding, connectingAssetId, onStartConnecting, onCancelConnecting, onRegenerateShot, onGenerateSingleShot, generatingShotKeys, productLine, onHoverRefNode, onDropImageToRefNode, onDropImageToCanvas, refImageUrls, freeRefNodes, imageAssets, onDeleteFreeRefNode, onCanvasMouseMove, manualEdges, onManualEdgeCreate, onCreateFreeFromLibraryAsset, onManualFreeNodeFromAsset, onClearRefNodeImage, onDropAssetToRefNode, shotReferences, optionalShotEnabled, videoAssetsByShot, currentVideoByShot, onOpenDirector, compositionPlan }) => {
   const noData = !instance || nodes.length === 0;
 
   // Shot data is sourced from the nodes/shotBindings props; visual nodes are produced by produceFixedLayout below.
@@ -184,13 +187,13 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
             const cv = cid ? ((videoAssetsByShot || {})[sk] || []).find((v: any) => v.id === cid) : null;
             return cv?.reviewStatus === 'approved';
           }).length;
-          n.data = { ...n.data, canMerge: allApproved, mergeStatus: approvedCount > 0 ? `${approvedCount}/${totalCount} 已通过` : '等待全部分镜审核通过' };
+          n.data = { ...n.data, canMerge: allApproved, mergeStatus: approvedCount > 0 ? `${approvedCount}/${totalCount} 已通过` : '等待全部分镜审核通过', onOpenDirector, compositionPlan };
         }
         return n;
       }),
       edges: raw.edges,
     };
-  }, [productLine, nodes, shotBindings, onSelectNode, onGenerateSingleShot, generatingShotKeys, connectingAssetId, onConnectBinding, onDropImageToRefNode, refImageUrls, onClearRefNodeImage, onDropAssetToRefNode, shotReferences, optionalShotEnabled, videoAssetsByShot, currentVideoByShot]);
+  }, [productLine, nodes, shotBindings, onSelectNode, onGenerateSingleShot, generatingShotKeys, connectingAssetId, onConnectBinding, onDropImageToRefNode, refImageUrls, onClearRefNodeImage, onDropAssetToRefNode, shotReferences, optionalShotEnabled, videoAssetsByShot, currentVideoByShot, onOpenDirector, compositionPlan]);
 
   // 10D-2: Build free reference nodes (dropped on canvas blank area)
   const freeRefNodesRf: RFNode[] = useMemo(() => (freeRefNodes || []).map(frn => {
@@ -364,6 +367,13 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
         // Attach free-node metadata for Inspector display
         _freeNodeId: rfNode.id,
         _freeNodeImageUrl: rfNode.data?.imageUrl,
+      } as any);
+    }
+    // 10J: Clicking MergeNode selects it in Inspector for composition director
+    if (rfNode.type === 'mergeNode') {
+      onSelectNode?.({
+        node_id: 'merge-node', shot_key: 'merge-node',
+        shot_name: '总合成', status: 'success', review_status: 'approved',
       } as any);
     }
   }, [nodes, onSelectNode, imageAssets]);

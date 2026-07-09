@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import * as api from '../api/mvp3';
 
 const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
@@ -9,6 +9,9 @@ import { ProductionCanvasView } from './ProductionCanvasView';
 import { SHOT_KEYS_DESK, SHOT_KEYS_WALL, REF_COUNTS_DESK, REF_COUNTS_WALL } from '../lib/fixedWorkflowLayout';
 import { RightInspectorPanel } from './RightInspectorPanel';
 import { ProductionStatusSummary } from './ProductionStatusSummary';
+import { CompositionDirectorPanel, deriveCompositionPlan } from './CompositionDirectorPanel';
+import type { CompositionPlan } from './CompositionDirectorPanel';
+import type { TimelineData } from './timeline-director/TimelineDirector';
 
 type NodeStatus = 'pending' | 'running' | 'success' | 'failed';
 interface NodeItem { node_id: string; shot_key: string; status: NodeStatus; [key: string]: any }
@@ -82,6 +85,34 @@ export const ProductionWorkbench: React.FC = () => {
 	const [manualEdges, setManualEdges] = useState<any[]>([]);
 	// 10F: Per-shot reference ordering (sourceNodeId array)
 	const [shotReferenceOrders, setShotReferenceOrders] = useState<Record<string, string[]>>({});
+
+  // 10J: Composition director state
+  const [compositionDirectorOpen, setCompositionDirectorOpen] = useState(false);
+  const [compositionTimelineData, setCompositionTimelineData] = useState<TimelineData | undefined>(undefined);
+
+  // 10J: Derived composition plan from timeline data
+  const compositionPlan: CompositionPlan | null = React.useMemo(
+    () => deriveCompositionPlan(compositionTimelineData, productLine),
+    [compositionTimelineData, productLine],
+  );
+
+  // 10J: Derived merge status for Inspector (mirrors ProductionCanvasView merge node logic)
+  const { canMerge, mergeStatus } = useMemo(() => {
+    const isWall = productLine === 'wall_calendar';
+    const baseKeys = isWall ? SHOT_KEYS_WALL : SHOT_KEYS_DESK;
+    const optKey = isWall ? 'W08_size_ref' : 'S07_size_ref';
+    const shotKeys = optionalShotEnabled ? [...baseKeys, optKey] : baseKeys;
+    const totalCount = shotKeys.length;
+    const approvedCount = shotKeys.filter((sk: string) => {
+      const cid = (currentVideoByShot || {})[sk];
+      const cv = cid ? ((videoAssetsByShot || {})[sk] || []).find((v: any) => v.id === cid) : null;
+      return cv?.reviewStatus === 'approved';
+    }).length;
+    return {
+      canMerge: approvedCount === totalCount && totalCount > 0,
+      mergeStatus: approvedCount > 0 ? `${approvedCount}/${totalCount} 已通过` : '等待全部分镜审核通过',
+    };
+  }, [productLine, optionalShotEnabled, videoAssetsByShot, currentVideoByShot]);
 
   // 10E: Derive per-shot reference lists from fixed + manual edges, 10F applies ordering
   // 10G: Use productLine-dependent shot keys and ref counts
@@ -424,6 +455,13 @@ export const ProductionWorkbench: React.FC = () => {
     setCurrentVideoByShot(prev => ({ ...prev, [shotKey]: videoId }));
   }, []);
 
+  // 10J: Composition director callbacks
+  const handleOpenDirector = useCallback(() => { setCompositionDirectorOpen(true); }, []);
+  const handleCloseDirector = useCallback(() => { setCompositionDirectorOpen(false); }, []);
+  const handleCompositionTimelineChange = useCallback((data: TimelineData) => {
+    setCompositionTimelineData(data);
+  }, []);
+
   // 10I: Video helpers are React hooks — E2E tests use real UI interactions only
 
   // 10D-4: Replace reference node image with library asset (by assetId)
@@ -536,14 +574,24 @@ export const ProductionWorkbench: React.FC = () => {
   }, []);
 
   return (
+    <>
     <div data-testid="mvp3-workbench" className="flex flex-col h-screen bg-[#0a0f1a] text-gray-200 font-sans overflow-hidden">
       {/* Header — fixed height */}
       <WorkbenchHeader modelAdapter={modelAdapter} adapters={adapters} onSetModelAdapter={setModelAdapter} onRunDemo={handleFullDemo} onReset={handleReset} loading={loading} onClearAllRefImages={handleClearAllFixedReferenceImages} />
 
       {/* Status Summary — fixed height */}
-      <div className="flex-shrink-0 border-b border-white/5 bg-[#0d1117]">
-        <ProductionStatusSummary productId={productId} checklist={checklist} selTemplateId={selTemplateId}
-          batchId={batchId} batchStatus={instance?.status||'ready'} nodes={nodes} instance={instance} />
+      <div className="flex-shrink-0 border-b border-white/5 bg-[#0d1117] flex items-center">
+        <div className="flex-1 min-w-0">
+          <ProductionStatusSummary productId={productId} checklist={checklist} selTemplateId={selTemplateId}
+            batchId={batchId} batchStatus={instance?.status||'ready'} nodes={nodes} instance={instance} />
+        </div>
+        <button
+          data-testid="director-open-header-btn"
+          onClick={handleOpenDirector}
+          className="text-[9px] text-gray-500 hover:text-purple-300 px-3 py-1 border-l border-white/5 flex-shrink-0"
+        >
+          导演台
+        </button>
       </div>
 
       {/* Three-column body — CSS Grid */}
@@ -604,6 +652,8 @@ export const ProductionWorkbench: React.FC = () => {
             shotReferences={shotReferences}
             videoAssetsByShot={videoAssetsByShot}
             currentVideoByShot={currentVideoByShot}
+            onOpenDirector={handleOpenDirector}
+            compositionPlan={compositionPlan}
           />
         </main>
 
@@ -624,9 +674,26 @@ export const ProductionWorkbench: React.FC = () => {
             onSetShotBatchCount={(sk, n) => setShotBatchCounts(prev => ({ ...prev, [sk]: n }))}
             videoAssetsByShot={videoAssetsByShot}
             currentVideoByShot={currentVideoByShot}
+            canMerge={canMerge}
+            mergeStatus={mergeStatus}
+            onOpenDirector={handleOpenDirector}
           />
         </div>
       </div>
     </div>
-  );
+
+    {/* 10J: Composition Director Modal */}
+    <CompositionDirectorPanel
+      isOpen={compositionDirectorOpen}
+      productLine={productLine}
+      videoAssetsByShot={videoAssetsByShot}
+      currentVideoByShot={currentVideoByShot}
+      savedTimelineData={compositionTimelineData}
+      canMerge={canMerge}
+      mergeStatus={mergeStatus}
+      onClose={handleCloseDirector}
+      onChange={handleCompositionTimelineChange}
+    />
+  </>
+);
 };
