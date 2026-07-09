@@ -352,16 +352,20 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
                 <RotateCcw className="w-3 h-3" /> 重新生成此分镜
               </button>
             )}
-            {node.status !== 'success' && node.status !== 'failed' && (
+            {onGenerateSingleShot && node.status !== 'failed' && (
               <div className="space-y-1.5">
-                {node.status === 'pending' && onGenerateSingleShot && (
+                {!node.node_id ? (
+                  <div data-testid="single-shot-generate-disabled-reason" className="text-gray-600 text-[10px] text-center py-2">
+                    璇峰厛鐢熸垚鎵规
+                  </div>
+                ) : (
                   <>
                     {generatingShotKeys?.includes(node.shot_key) ? (
                       <div data-testid="single-shot-generating-status" className="flex items-center justify-center gap-1.5 text-blue-400 text-[10px] py-1">
                         <Loader2 className="w-3 h-3 animate-spin" /> 生成中...
                       </div>
                     ) : (
-                      <button data-testid="single-shot-generate-button"
+                      <button data-testid={`inspector-generate-shot-${node.shot_key}`}
                         onClick={() => onGenerateSingleShot(node.node_id, node.shot_key)}
                         className="flex items-center justify-center gap-1.5 bg-purple-900/40 hover:bg-purple-900/60 text-purple-300 text-xs px-3 py-2 rounded-lg w-full transition-colors border border-purple-700/20 font-medium">
                         <Play className="w-3 h-3" /> 生成此分镜
@@ -369,7 +373,7 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
                     )}
                   </>
                 )}
-                {node.status !== 'pending' && (
+                {false && (
                   <div className="text-gray-600 text-[10px] text-center py-2">节点完成后可进行操作</div>
                 )}
               </div>

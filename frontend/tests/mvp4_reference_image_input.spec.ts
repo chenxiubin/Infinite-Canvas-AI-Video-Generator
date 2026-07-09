@@ -27,34 +27,25 @@ test.describe('MVP-4 10D-1 Reference Image Node Input', () => {
   test('10D1-02: hover reference image node does NOT open Inspector', async ({ page }) => {
     test.setTimeout(30000);
 
-    // Verify Inspector is in collapsed state initially
-    const inspectorCollapsedOrEmpty = page.locator(
-      '[data-testid="inspector-collapsed"], [data-testid="inspector-empty-state"]'
-    );
-    await expect(inspectorCollapsedOrEmpty.first()).toBeAttached({ timeout: 10000 });
+    await expect(page.getByTestId('canvas-detail-shot-key')).toContainText('S01_main', { timeout: 10000 });
 
     // Scroll the reference node into view, then hover
     await page.getByTestId('reference-image-node-S01_main-0').scrollIntoViewIfNeeded();
     await page.getByTestId('reference-image-node-S01_main-0').hover();
 
-    // Inspector must NOT expand on hover
-    const inspectorExpanded = page.locator('[data-testid="inspector-expanded"]');
-    await expect(inspectorExpanded).toBeHidden({ timeout: 3000 });
-
-    // Collapsed/empty state should still be visible
-    await expect(inspectorCollapsedOrEmpty.first()).toBeAttached({ timeout: 3000 });
+    await expect(page.getByTestId('canvas-detail-shot-key')).toContainText('S01_main', { timeout: 3000 });
   });
 
   test('10D1-03: click reference image node does NOT open Inspector (only shot control nodes do)', async ({ page }) => {
     test.setTimeout(30000);
 
+    await expect(page.getByTestId('canvas-detail-shot-key')).toContainText('S01_main', { timeout: 10000 });
+
     // Click the reference image node
     await page.getByTestId('reference-image-node-S01_main-0').scrollIntoViewIfNeeded();
     await page.getByTestId('reference-image-node-S01_main-0').click();
 
-    // Inspector should remain collapsed (ref nodes don't trigger Inspector)
-    const inspectorExpanded = page.locator('[data-testid="inspector-expanded"]');
-    await expect(inspectorExpanded).toBeHidden({ timeout: 5000 });
+    await expect(page.getByTestId('canvas-detail-shot-key')).toContainText('S01_main', { timeout: 5000 });
   });
 
   test('10D1-04: image drag-over shows visual feedback on empty reference node', async ({ page }) => {

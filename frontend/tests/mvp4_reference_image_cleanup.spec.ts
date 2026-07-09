@@ -203,8 +203,7 @@ test.describe('MVP-4 10D-4 Reference Image Cleanup', () => {
     const edgeCount = await page.locator('.react-flow__edge').count();
     // Clear-all button is in the top header toolbar, always visible
     await page.getByTestId('clear-all-fixed-ref-images').click();
-    const afterCount = await page.locator('.react-flow__edge').count();
-    expect(afterCount).toBeGreaterThanOrEqual(edgeCount);
+    await expect.poll(async () => await page.locator('.react-flow__edge').count(), { timeout: 5000 }).toBeGreaterThanOrEqual(edgeCount);
   });
 
   test('10D4-10: fixed ref node has no delete button, only clear button', async ({ page }) => {

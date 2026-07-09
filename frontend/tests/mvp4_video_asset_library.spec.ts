@@ -169,8 +169,10 @@ test.describe('MVP-4 10I Video Asset Library', () => {
     await expect(page.getByTestId('merge-node-status')).toContainText('6/6 已通过');
 
     // Generate v2 pending for S01 → v2 becomes current, v1 becomes history
+    await page.locator('.react-flow__pane').click({ position: { x: 400, y: 200 } });
+    await page.getByTestId('canvas-reset-view').click();
     await page.getByTestId('shot-control-node-S01_main').scrollIntoViewIfNeeded();
-    await page.getByTestId('shot-control-generate-S01_main').click();
+    await page.getByTestId('shot-control-generate-S01_main').click({ timeout: 15000 });
 
     // Open video library
     await page.getByTestId('sidebar-icon-assets').hover();

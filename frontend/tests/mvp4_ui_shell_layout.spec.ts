@@ -70,22 +70,19 @@ test.describe('MVP-4 UI Shell Layout', () => {
     await expect(page.getByTestId('workflow-sidebar-expanded')).toBeHidden({ timeout: 5000 });
   });
 
-  test('M4-UiShell-03: right inspector empty state collapsed, expands on node select', async ({ page }) => {
+  test('M4-UiShell-03: right inspector defaults to S01_main and stays expanded on node select', async ({ page }) => {
     test.setTimeout(30000);
-
-    const inspectorCollapsedOrEmpty = page.locator(
-      '[data-testid="inspector-collapsed"], [data-testid="inspector-empty-state"]'
-    );
-    await expect(inspectorCollapsedOrEmpty.first()).toBeAttached({ timeout: 10000 });
-
-    // Real click — nodrag class on ShotControlNode prevents React Flow interception
-    await page.getByTestId('shot-control-node-S01_main').click();
 
     const inspectorExpanded = page.locator(
       '[data-testid="inspector-expanded"], [data-testid="inspector-slide-panel"]'
     );
     await expect(inspectorExpanded.first()).toBeAttached({ timeout: 15000 });
+    await expect(page.getByTestId('canvas-detail-shot-key')).toContainText('S01_main', { timeout: 5000 });
 
+    // Real click — nodrag class on ShotControlNode prevents React Flow interception
+    await page.getByTestId('shot-control-node-S01_main').click();
+
+    await expect(inspectorExpanded.first()).toBeAttached({ timeout: 15000 });
     await expect(page.getByTestId('canvas-detail-shot-key')).toContainText('S01_main', { timeout: 5000 });
   });
 

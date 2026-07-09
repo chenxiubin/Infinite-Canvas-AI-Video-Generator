@@ -13,6 +13,7 @@ import { ModelSettingsPanel } from './ModelSettingsPanel';
 import { type UserModelSettings } from '../types/modelSettings';
 import { loadUserModelSettings, saveUserModelSettings } from '../lib/userModelSettingsStore';
 import { getBuiltinVideoModels, findModelById } from '../lib/apimartClient';
+import { uploadImageToApimart, submitApimartVideoGeneration, pollApimartTask, buildApimartVideoRequest, type VideoGenerationTaskState, type ApimartUploadedImage } from '../lib/apimartGenerationClient';
 
 type NodeStatus = 'pending' | 'running' | 'success' | 'failed';
 interface NodeItem { node_id: string; shot_key: string; status: NodeStatus; [key: string]: any }
@@ -22,7 +23,7 @@ interface WorkbenchAsset { id: string; filename: string; url: string; role: stri
 interface ShotFrameBinding { shotKey: string; startFrameAssetId?: string; startFrameBindingId?: string; endFrameAssetId?: string; endFrameBindingId?: string; referenceAssetIds?: string[]; referenceBindingIds?: string[]; }
 
 // 10D-2: Mock image asset — kept in a front-end-only library, separate from WorkbenchAsset
-interface ImageAsset { id: string; name: string; url: string; mimeType: string; createdAt: number; source: string; fileName: string; size: number; contentHash: string; }
+interface ImageAsset { id: string; name: string; url: string; mimeType: string; createdAt: number; source: string; fileName: string; size: number; contentHash: string; remoteUrls?: { apimart?: { url: string; uploadedAt: number; filename?: string; contentType?: string; bytes?: number } } }
 
 // 10D-2: Free-standing reference image node (not part of fixed layout)
 interface FreeRefNode { id: string; imageAssetId: string; position: { x: number; y: number }; }
@@ -89,6 +90,8 @@ export const ProductionWorkbench: React.FC = () => {
     setSelectedNodeId(newKeys[0]);
   }, [productLine]);
   const [generatingShotKeys, setGeneratingShotKeys] = useState<string[]>([]);
+  // 10K-2: APIMart generation tasks per shot
+  const [videoGenerationTasks, setVideoGenerationTasks] = useState<Record<string, VideoGenerationTaskState>>({});
   // 10K-1: Payload summary for E2E (no apiKey)
   const [lastGenerateSummary, setLastGenerateSummary] = useState<string>('');
 	// 10D-1: Reference image node interactions — hover target via ref (no re-render)
@@ -173,7 +176,11 @@ export const ProductionWorkbench: React.FC = () => {
   const refreshAll = async () => { if (instanceRef.current) { const i = await api.getVideoInstance(instanceRef.current.instance_id); setInstance(i); setNodes(i.nodes || []); } };
   const handleSelectNode = useCallback((n: any) => { setSelectedNodeId(n?.node_id || n?.shot_key || null); }, []);
 
-  useEffect(() => { api.listVideoTemplates().then(d => setTemplates(d.templates || [])).catch(() => {}); api.listModelAdapters().then(d => setAdapters(d.adapters || [])).catch(() => {}); }, []);
+  useEffect(() => { api.listVideoTemplates().then(d => setTemplates(d.templates || [])).catch((e) => console.warn('Templates load failed:', e?.message)); api.listModelAdapters().then(d => setAdapters(d.adapters || [])).catch((e) => console.warn('Adapters load failed:', e?.message)); }, []);
+  useEffect(() => {
+    if (selectedNodeId) return;
+    setSelectedNodeId(productLine === 'wall_calendar' ? 'W01_main' : 'S01_main');
+  }, [productLine, selectedNodeId]);
 
   // --- Full Demo ---
   const handleFullDemo = async () => {
@@ -283,41 +290,132 @@ export const ProductionWorkbench: React.FC = () => {
   };
   const handleGenerateSingleShot = async (nodeId: string, shotKey: string) => {
     if (!nodeId) return;
-    setGeneratingShotKeys(prev => [...prev, shotKey]);
-    try {
-      const config = (storyboardConfigs || {})[shotKey] || getDefaultStoryboardConfig(shotKey, productLine, motionShotVersion);
-      const prompt = buildFinalPrompt(config);
-      // 10E/10F: Include ready reference images in order
-      const refs = (shotReferences || {})[shotKey] || [];
-      const readyRefs = refs.filter(r => r.status === 'ready');
-      const reference_images = readyRefs.map((r, i) => ({
-        nodeId: r.sourceNodeId, imageAssetId: r.imageAssetId, url: r.imageUrl, fileName: r.fileName, kind: r.kind, order: i,
-      }));
-      const batch_count = shotBatchCounts[shotKey] || 1;
-      // 10K-1: Expose payload for E2E (no apiKey) + visible summary
-      const payload = {
-        shotKey, nodeId, prompt, reference_images, batch_count,
-        provider: userModelSettings.provider,
-        model: userModelSettings.selectedVideoModelId,
-        duration: userModelSettings.defaultVideoDuration,
-        resolution: userModelSettings.defaultVideoResolution,
-        aspectRatio: userModelSettings.defaultAspectRatio,
-        audio: userModelSettings.defaultVideoAudio,
-      };
-      if (typeof window !== 'undefined') (window as any).__lastGeneratePayload = payload;
-      setLastGenerateSummary(
-        `provider:${payload.provider} model:${payload.model} duration:${payload.duration}s resolution:${payload.resolution} aspectRatio:${payload.aspectRatio} audio:${payload.audio}`
-      );
-      // Always force-generate so previously-success nodes also create new versions
-      const result = await api.generateVideoNode(nodeId, { prompt, force: true });
-      setNodes(prev => prev.map(n => n.shot_key === shotKey ? { ...n, status: result.status, video_url: result.video_url, cover_url: result.cover_url } : n));
-      // 10I: Auto-add to video library on single-shot generate
-      if (result.status === 'success' && result.video_url) {
-        const shotName = (shotReferences || {})[shotKey]?.[0]?.shot_name || shotKey;
-        addVideoToLibrary(shotKey, shotName, result.video_url, 'single-generate', 'pending');
+    const config = (storyboardConfigs || {})[shotKey] || getDefaultStoryboardConfig(shotKey, productLine, motionShotVersion);
+    const prompt = buildFinalPrompt(config);
+    const refs = (shotReferences || {})[shotKey] || [];
+    const readyRefs = refs.filter(r => r.status === 'ready');
+    const reference_images = readyRefs.map((r, i) => ({
+      nodeId: r.sourceNodeId, imageAssetId: r.imageAssetId, url: r.imageUrl, fileName: r.fileName, kind: r.kind, order: i,
+    }));
+    const batch_count = shotBatchCounts[shotKey] || 1;
+
+    const payload = {
+      shotKey, nodeId, prompt, reference_images, batch_count,
+      provider: userModelSettings.provider,
+      model: userModelSettings.selectedVideoModelId,
+      duration: userModelSettings.defaultVideoDuration,
+      resolution: userModelSettings.defaultVideoResolution,
+      aspectRatio: userModelSettings.defaultAspectRatio,
+      audio: userModelSettings.defaultVideoAudio,
+    };
+    if (typeof window !== 'undefined') (window as any).__lastGeneratePayload = payload;
+    setLastGenerateSummary(
+      `provider:${payload.provider} model:${payload.model} duration:${payload.duration}s resolution:${payload.resolution} aspectRatio:${payload.aspectRatio} audio:${payload.audio}`
+    );
+
+    const now = Date.now();
+    const initTask: VideoGenerationTaskState = { shotKey, provider: userModelSettings.provider, model: userModelSettings.selectedVideoModelId, status: 'idle', progress: 0, startedAt: now, updatedAt: now };
+    setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: initTask }));
+
+    // ── Mock path (unchanged) ──
+    if (userModelSettings.provider === 'mock') {
+      setGeneratingShotKeys(prev => [...prev, shotKey]);
+      try {
+        const result = await api.generateVideoNode(nodeId, { prompt, force: true });
+        setNodes(prev => prev.map(n => n.shot_key === shotKey ? { ...n, status: result.status, video_url: result.video_url, cover_url: result.cover_url } : n));
+        if (result.status === 'success' && result.video_url) {
+          const shotName = (shotReferences || {})[shotKey]?.[0]?.shot_name || shotKey;
+          addVideoToLibrary(shotKey, shotName, result.video_url, 'single-generate', 'pending');
+        }
+        setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, status: 'success', progress: 100, updatedAt: Date.now() } }));
+      } catch (e: any) {
+        setError(e?.message || '生成失败');
+        setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, status: 'failed', errorMessage: e?.message || '生成失败', updatedAt: Date.now() } }));
+      } finally {
+        setGeneratingShotKeys(prev => prev.filter(k => k !== shotKey));
       }
-    } catch (e: any) { setError(e?.message || '生成失败'); }
-    finally { setGeneratingShotKeys(prev => prev.filter(k => k !== shotKey)); }
+      return;
+    }
+
+    // ── APIMart path ──
+    if (!userModelSettings.apimartApiKey) {
+      const msg = '请先在模型设置中填写 APIMart API Key。';
+      setError(msg);
+      setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, status: 'failed', errorMessage: msg, updatedAt: Date.now() } }));
+      return;
+    }
+
+    const apiKey = userModelSettings.apimartApiKey;
+    const baseUrl = userModelSettings.apimartBaseUrl;
+    const modelInfo = findModelById(builtinVideoModels, userModelSettings.selectedVideoModelId);
+
+    const runApimartGeneration = async () => {
+      try {
+        // Phase 1: Upload reference images (with remoteUrl cache)
+        setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, status: 'uploading', progress: 0, updatedAt: Date.now() } }));
+        const uploadedImages: ApimartUploadedImage[] = [];
+        const updatedImageAssets = [...imageAssets];
+        for (const ref of reference_images) {
+          if (!ref.url) { uploadedImages.push({ url: '' }); continue; }
+          // Check cache
+          const imgAsset = updatedImageAssets.find(a => a.id === ref.imageAssetId || a.url === ref.url);
+          const cachedUrl = imgAsset?.remoteUrls?.apimart?.url;
+          if (cachedUrl) {
+            uploadedImages.push({ url: cachedUrl, filename: ref.fileName });
+            continue;
+          }
+          try {
+            const blobResp = await fetch(ref.url);
+            const blob = await blobResp.blob();
+            const r = await uploadImageToApimart(apiKey, baseUrl, blob, ref.fileName || 'reference.png', blob.type || 'image/png');
+            uploadedImages.push(r);
+            // Update cache on the matched asset
+            const idx = updatedImageAssets.findIndex(a => a.id === ref.imageAssetId || a.url === ref.url);
+            if (idx >= 0) {
+              updatedImageAssets[idx] = { ...updatedImageAssets[idx], remoteUrls: { ...updatedImageAssets[idx].remoteUrls, apimart: { url: r.url, uploadedAt: Date.now(), filename: r.filename, contentType: r.contentType, bytes: r.bytes } } };
+            }
+          } catch (e: any) {
+            throw new Error(`参考图上传失败: ${sanitizeStr(e?.message || '')}`);
+          }
+        }
+        setImageAssets(updatedImageAssets);
+
+        // Phase 2: Submit video generation
+        const { request: apimartReq, warnings } = buildApimartVideoRequest(
+          modelInfo, prompt, userModelSettings.defaultVideoDuration,
+          userModelSettings.defaultAspectRatio, userModelSettings.defaultVideoResolution,
+          userModelSettings.defaultVideoAudio, uploadedImages,
+        );
+        setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, status: 'queued', progress: 0, warningMessages: warnings, updatedAt: Date.now() } }));
+        const taskId = await submitApimartVideoGeneration(apiKey, baseUrl, apimartReq);
+
+        // Phase 3: Poll (returns final task, no extra request)
+        const shotName = (shotReferences || {})[shotKey]?.[0]?.shot_name || shotKey;
+        const finalTask = await pollApimartTask(apiKey, baseUrl, taskId, (task) => {
+          setVideoGenerationTasks(prev => ({
+            ...prev,
+            [shotKey]: { ...initTask, taskId, status: task.status, progress: task.progress, errorMessage: task.errorMessage, warningMessages: warnings, updatedAt: Date.now() },
+          }));
+        });
+
+        if (finalTask.status === 'success' && finalTask.videoUrl) {
+          addVideoToLibrary(shotKey, shotName, finalTask.videoUrl, 'apimart-generate', 'pending');
+          setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, taskId, status: 'success', progress: 100, warningMessages: warnings, updatedAt: Date.now() } }));
+        } else {
+          setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, taskId, status: 'failed', progress: 0, errorMessage: finalTask.errorMessage || '生成失败', warningMessages: warnings, updatedAt: Date.now() } }));
+        }
+      } catch (e: any) {
+        const errMsg = sanitizeStr(e?.message || '');
+        setError(errMsg);
+        setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, status: 'failed', errorMessage: errMsg, updatedAt: Date.now() } }));
+      }
+    };
+    // Fire and forget (poll loop handles async)
+    runApimartGeneration().catch((e) => {
+      const errMsg = sanitizeStr(e?.message || '生成失败');
+      setError(errMsg);
+      setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, status: 'failed', errorMessage: errMsg, updatedAt: Date.now() } }));
+    });
   };
   const handleReviewAction = (shotKey: string, action: string, reason?: string) => {
     if (action === 'approve') {
@@ -544,7 +642,7 @@ export const ProductionWorkbench: React.FC = () => {
       e.preventDefault();
       const file = imgItem.getAsFile();
       if (file) {
-        addImageFromFile(file, hoveredRefNodeIdRef.current || undefined).catch(() => {});
+        addImageFromFile(file, hoveredRefNodeIdRef.current || undefined).catch((e) => console.warn('Image paste failed:', e?.message));
       }
     }
   };

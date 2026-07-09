@@ -165,6 +165,15 @@ test.describe('MVP-4 10K-1 APIMart Model Settings', () => {
 
   test('K1-13: generate stores payload summary without apiKey', async ({ page }) => {
     test.setTimeout(90000);
+    // Mock APIMart for successful generation
+    await page.route('**/api.apimart.ai/**', async (route) => {
+      const url = route.request().url();
+      let body = '{}';
+      if (url.includes('/uploads')) body = JSON.stringify({ url: 'https://mock.apimart.ai/img.png' });
+      else if (url.includes('/generations')) body = JSON.stringify({ task_id: 'task_mock_payload' });
+      else body = JSON.stringify({ status: 'completed', progress: 100, result: { video_url: 'https://mock.apimart.ai/video.mp4' } });
+      await route.fulfill({ status: 200, contentType: 'application/json', body });
+    });
     // Setup APIMart with key and duration=8
     await openSettings(page);
     await page.getByTestId('model-provider-apimart').click();
@@ -178,10 +187,9 @@ test.describe('MVP-4 10K-1 APIMart Model Settings', () => {
     await expect(page.getByTestId('production-status-compact')).toBeAttached({ timeout: 30000 });
     await expect(page.getByTestId('merge-node-status')).toContainText('已通过', { timeout: 10000 });
 
-    // Generate S01 via canvas button with viewport fix
-    await page.getByTestId('canvas-reset-view').click();
-    await page.getByTestId('shot-control-node-S01_main').scrollIntoViewIfNeeded();
-    await page.getByTestId('shot-control-generate-S01_main').click({ timeout: 15000 });
+    await expect(page.getByTestId('canvas-detail-shot-key')).toContainText('S01_main', { timeout: 5000 });
+    await expect(page.getByTestId('inspector-generate-shot-S01_main')).toBeVisible({ timeout: 10000 });
+    await page.getByTestId('inspector-generate-shot-S01_main').click();
 
     // Wait for v2 to appear
     await page.getByTestId('sidebar-icon-assets').hover();
