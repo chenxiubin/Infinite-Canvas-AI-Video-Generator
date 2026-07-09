@@ -9,6 +9,10 @@ import { ProductionCanvasView } from './ProductionCanvasView';
 import { SHOT_KEYS_DESK, SHOT_KEYS_WALL, REF_COUNTS_DESK, REF_COUNTS_WALL } from '../lib/fixedWorkflowLayout';
 import { RightInspectorPanel } from './RightInspectorPanel';
 import { ProductionStatusSummary } from './ProductionStatusSummary';
+import { ModelSettingsPanel } from './ModelSettingsPanel';
+import { type UserModelSettings } from '../types/modelSettings';
+import { loadUserModelSettings, saveUserModelSettings } from '../lib/userModelSettingsStore';
+import { getBuiltinVideoModels, findModelById } from '../lib/apimartClient';
 
 type NodeStatus = 'pending' | 'running' | 'success' | 'failed';
 interface NodeItem { node_id: string; shot_key: string; status: NodeStatus; [key: string]: any }
@@ -55,6 +59,20 @@ export const ProductionWorkbench: React.FC = () => {
   // 10I: Video asset library
   const [videoAssetsByShot, setVideoAssetsByShot] = useState<Record<string, VideoAssetVersion[]>>({});
   const [currentVideoByShot, setCurrentVideoByShot] = useState<Record<string, string>>({});
+  // 10K-1: Model settings
+  const [userModelSettings, setUserModelSettings] = useState<UserModelSettings>(loadUserModelSettings);
+  const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
+  // 10K-1: Look up Chinese model name for header display
+  const builtinVideoModels = getBuiltinVideoModels();
+  const selectedModelInfo = findModelById(builtinVideoModels, userModelSettings.selectedVideoModelId);
+  const selectedModelDisplayName = selectedModelInfo?.name || userModelSettings.selectedVideoModelId;
+  const modelSettingsLabel =
+    userModelSettings.provider === 'mock' ? 'Mock 演示' :
+    userModelSettings.apimartApiKey ? `APIMart · ${selectedModelDisplayName}` : 'APIMart · 未配置 Key';
+  const handleModelSettingsChanged = useCallback((s: UserModelSettings) => {
+    setUserModelSettings(s);
+    saveUserModelSettings(s);
+  }, []);
   const handleSetProductLine = useCallback((pl: 'desk_calendar' | 'wall_calendar') => {
     if (pl === productLine) return;
     setProductLine(pl);
@@ -71,6 +89,8 @@ export const ProductionWorkbench: React.FC = () => {
     setSelectedNodeId(newKeys[0]);
   }, [productLine]);
   const [generatingShotKeys, setGeneratingShotKeys] = useState<string[]>([]);
+  // 10K-1: Payload summary for E2E (no apiKey)
+  const [lastGenerateSummary, setLastGenerateSummary] = useState<string>('');
 	// 10D-1: Reference image node interactions — hover target via ref (no re-render)
 	const hoveredRefNodeIdRef = useRef<string | null>(null);
 	const setHoveredRefNodeId = useCallback((id: string | null) => { hoveredRefNodeIdRef.current = id; }, []);
@@ -274,8 +294,20 @@ export const ProductionWorkbench: React.FC = () => {
         nodeId: r.sourceNodeId, imageAssetId: r.imageAssetId, url: r.imageUrl, fileName: r.fileName, kind: r.kind, order: i,
       }));
       const batch_count = shotBatchCounts[shotKey] || 1;
-      // Expose for test verification
-      if (typeof window !== 'undefined') (window as any).__lastGeneratePayload = { shotKey, nodeId, prompt, reference_images, batch_count };
+      // 10K-1: Expose payload for E2E (no apiKey) + visible summary
+      const payload = {
+        shotKey, nodeId, prompt, reference_images, batch_count,
+        provider: userModelSettings.provider,
+        model: userModelSettings.selectedVideoModelId,
+        duration: userModelSettings.defaultVideoDuration,
+        resolution: userModelSettings.defaultVideoResolution,
+        aspectRatio: userModelSettings.defaultAspectRatio,
+        audio: userModelSettings.defaultVideoAudio,
+      };
+      if (typeof window !== 'undefined') (window as any).__lastGeneratePayload = payload;
+      setLastGenerateSummary(
+        `provider:${payload.provider} model:${payload.model} duration:${payload.duration}s resolution:${payload.resolution} aspectRatio:${payload.aspectRatio} audio:${payload.audio}`
+      );
       // Always force-generate so previously-success nodes also create new versions
       const result = await api.generateVideoNode(nodeId, { prompt, force: true });
       setNodes(prev => prev.map(n => n.shot_key === shotKey ? { ...n, status: result.status, video_url: result.video_url, cover_url: result.cover_url } : n));
@@ -536,9 +568,13 @@ export const ProductionWorkbench: React.FC = () => {
   }, []);
 
   return (
+    <React.Fragment>
     <div data-testid="mvp3-workbench" className="flex flex-col h-screen bg-[#0a0f1a] text-gray-200 font-sans overflow-hidden">
       {/* Header — fixed height */}
-      <WorkbenchHeader modelAdapter={modelAdapter} adapters={adapters} onSetModelAdapter={setModelAdapter} onRunDemo={handleFullDemo} onReset={handleReset} loading={loading} onClearAllRefImages={handleClearAllFixedReferenceImages} />
+      <WorkbenchHeader modelAdapter={modelAdapter} adapters={adapters} onSetModelAdapter={setModelAdapter} onRunDemo={handleFullDemo} onReset={handleReset} loading={loading} onClearAllRefImages={handleClearAllFixedReferenceImages}
+        modelSettingsLabel={modelSettingsLabel}
+        onOpenModelSettings={() => setModelSettingsOpen(true)}
+      />
 
       {/* Status Summary — fixed height */}
       <div className="flex-shrink-0 border-b border-white/5 bg-[#0d1117]">
@@ -547,6 +583,10 @@ export const ProductionWorkbench: React.FC = () => {
       </div>
 
       {/* Three-column body — CSS Grid */}
+      {/* 10K-1: Hidden payload summary for E2E (no apiKey) */}
+      {lastGenerateSummary && (
+        <div data-testid="last-generate-payload-summary" className="hidden">{lastGenerateSummary}</div>
+      )}
       <div data-testid="workbench-shell" className="grid flex-1 min-h-0 overflow-hidden"
         style={{ gridTemplateColumns: 'auto minmax(0, 1fr) auto' }}>
         {/* Left: Workflow Sidebar */}
@@ -628,5 +668,12 @@ export const ProductionWorkbench: React.FC = () => {
         </div>
       </div>
     </div>
+
+    <ModelSettingsPanel
+      isOpen={modelSettingsOpen}
+      onClose={() => setModelSettingsOpen(false)}
+      onSettingsChanged={handleModelSettingsChanged}
+    />
+    </React.Fragment>
   );
 };

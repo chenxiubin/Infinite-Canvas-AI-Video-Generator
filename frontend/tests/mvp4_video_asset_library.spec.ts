@@ -68,9 +68,16 @@ test.describe('MVP-4 10I Video Asset Library', () => {
     test.setTimeout(60000);
     await page.getByTestId('run-full-demo-button').click();
     await expect(page.getByTestId('production-status-compact')).toBeAttached({ timeout: 30000 });
-    // Select S01 shot
+    // Open video library to verify S01_main video exists, then select via inspector
+    await page.getByTestId('sidebar-icon-assets').hover();
+    await page.getByTestId('asset-tab-video').click();
+    await expect(page.getByTestId('video-version-card-S01_main-v1')).toBeAttached({ timeout: 5000 });
+    // Select shot node: focus canvas, reset view, click
+    await page.locator('.react-flow__pane').click({ position: { x: 400, y: 200 } });
+    await page.getByTestId('canvas-reset-view').click();
+    await page.locator('.react-flow__pane').waitFor({ state: 'visible', timeout: 3000 });
     await page.getByTestId('shot-control-node-S01_main').scrollIntoViewIfNeeded();
-    await page.getByTestId('shot-control-node-S01_main').click();
+    await page.getByTestId('shot-control-node-S01_main').click({ timeout: 15000 });
     // Inspector should show current video info
     await expect(page.getByTestId('inspector-current-video')).toBeAttached({ timeout: 8000 });
     await expect(page.getByTestId('inspector-current-video')).toContainText('v1');
@@ -105,8 +112,11 @@ test.describe('MVP-4 10I Video Asset Library', () => {
     await expect(page.getByTestId('production-status-compact')).toBeAttached({ timeout: 60000 });
 
     // Click S01 generate button → creates v2 pending as current
+    await page.locator('.react-flow__pane').click({ position: { x: 400, y: 200 } });
+    await page.getByTestId('canvas-reset-view').click();
+    await page.locator('.react-flow__pane').waitFor({ state: 'visible', timeout: 3000 });
     await page.getByTestId('shot-control-node-S01_main').scrollIntoViewIfNeeded();
-    await page.getByTestId('shot-control-generate-S01_main').click();
+    await page.getByTestId('shot-control-generate-S01_main').click({ timeout: 15000 });
 
     // Open video library in sidebar
     await page.getByTestId('sidebar-icon-assets').hover();
