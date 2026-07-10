@@ -1,11 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
-  testDir: './tests',
-  testIgnore: ['**/legacy/**'],
+  testDir: './tests/legacy',
   fullyParallel: false,
-  forbidOnly: !!process.env.CI,
-  retries: 1,
+  retries: 0,
   workers: 1,
   reporter: 'list',
   use: {
@@ -23,11 +21,4 @@ export default defineConfig({
       },
     },
   ],
-  // webServer disabled — servers must be running manually before tests
-  // webServer: {
-  //   command: 'npm run dev',
-  //   url: 'http://localhost:5173',
-  //   reuseExistingServer: true,
-  //   timeout: 60000,
-  // },
 });

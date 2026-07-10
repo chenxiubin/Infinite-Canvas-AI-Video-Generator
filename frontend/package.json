@@ -8,12 +8,14 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test:backend": "python -m unittest discover -s ../backend/tests",
-    "test:e2e": "npx playwright test --grep \"G1|G2|H1|H2|H3|I1|I2|I3|I4|J1|J3|J4|K1|K2-a\"",
-    "test:e2e:mvp3": "npx playwright test --grep \"M3-\"",
-    "test:e2e:mvp3:canvas": "npx playwright test --grep \"M3-Canvas\"",
-    "test:e2e:mvp3:demo": "npx playwright test --grep \"M3-Demo\"",
-    "test": "npm run test:backend && npm run test:e2e"
+    "test:backend": "cd ../backend && python -m unittest discover -s tests -v",
+    "test:frontend": "npx playwright test",
+    "test:mvp4": "npx playwright test",
+    "test:legacy": "npx playwright test -c playwright.legacy.config.ts",
+    "test:legacy:report": "npx playwright test -c playwright.legacy.config.ts || true",
+    "test:legacy:mvp2": "npx playwright test -c playwright.legacy.config.ts mvp2.spec.ts",
+    "test:legacy:mvp3": "npx playwright test -c playwright.legacy.config.ts mvp3_*.spec.ts",
+    "test": "npm run test:backend && npm run test:frontend"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.2",

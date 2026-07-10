@@ -27,8 +27,10 @@ test.describe('MVP-4 10K-2 APIMart Generation Flow', () => {
     const selectedShot = await shotKeyLabel.textContent().catch(() => '');
     if (!selectedShot?.includes(shotKey)) {
       await page.getByTestId('canvas-reset-view').click();
-      await expect(page.getByTestId(`shot-control-node-${shotKey}`)).toBeVisible({ timeout: 10000 });
-      await page.getByTestId(`shot-control-node-${shotKey}`).click();
+      const node = page.getByTestId(`shot-control-node-${shotKey}`);
+      await node.scrollIntoViewIfNeeded();
+      await expect(node).toBeVisible({ timeout: 10000 });
+      await node.click();
     }
     await expect(shotKeyLabel).toContainText(shotKey, { timeout: 8000 });
   }
@@ -144,6 +146,7 @@ test.describe('MVP-4 10K-2 APIMart Generation Flow', () => {
     for (const ri of [0, 1]) {
       const refNode = page.getByTestId(`reference-image-node-S04_motion-${ri}`);
       await refNode.scrollIntoViewIfNeeded();
+      await expect(refNode).toBeVisible({ timeout: 5000 });
       await refNode.evaluate((el: any, bytes: any) => {
         const file = new File([new Uint8Array(bytes)], `ref${bytes.length}.png`, { type: 'image/png' });
         const dt = new DataTransfer(); dt.items.add(file);
