@@ -33,7 +33,7 @@ export const DirectorConsole: React.FC<Props> = ({
   <div className="space-y-2" data-testid="sidebar-section-directorDesk">
     <SectionCard title="导演台" icon={<Eye className="w-3 h-3" />}>
       {!instance ? (
-        <div className="text-gray-500 text-[10px] leading-relaxed">
+        <div className="text-gray-300 text-[11px] leading-relaxed py-2 text-center">
           请先创建视频批次并生成分镜视频。
         </div>
       ) : (() => {
@@ -75,8 +75,8 @@ export const DirectorConsole: React.FC<Props> = ({
                 const cid = (currentVideoByShot || {})[sk];
                 const cv = cid ? ((videoAssetsByShot || {})[sk] || []).find((v: any) => v.id === cid) : null;
                 const statusCls = cv?.reviewStatus === 'approved' ? 'text-green-400' : cv?.reviewStatus === 'rejected' ? 'text-red-400' : 'text-amber-400';
-                const statusBadgeCls = cv?.reviewStatus === 'approved' ? 'bg-green-900/40 text-green-400 border-green-500/30' : cv?.reviewStatus === 'rejected' ? 'bg-red-900/40 text-red-400 border-red-500/30' : 'bg-amber-900/30 text-amber-400 border-amber-500/30';
-                const statusLabel = cv?.reviewStatus === 'approved' ? '✓ 已通过' : cv?.reviewStatus === 'rejected' ? '✗ 已驳回' : cv ? '⏳ 待审核' : '○ 未生成';
+                const statusBadgeCls = cv?.reviewStatus === 'approved' ? 'bg-green-900/40 text-green-400 border-green-500/30' : cv?.reviewStatus === 'rejected' ? 'bg-red-900/40 text-red-400 border-red-500/30' : cv ? 'bg-amber-900/30 text-amber-400 border-amber-500/30' : 'bg-gray-700/50 text-gray-300 border-gray-600/30';
+                const statusLabel = cv?.reviewStatus === 'approved' ? '✓ 已通过' : cv?.reviewStatus === 'rejected' ? '✗ 已驳回' : cv ? '⏳ 待审核' : '未生成';
                 return (
                   <div key={sk} data-testid={`director-shot-${sk}`} className="flex items-center gap-2 text-[9px] bg-[#0a0f1a] border border-white/5 rounded px-2 py-1">
                     <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: cv?.reviewStatus === 'approved' ? '#4ade80' : cv?.reviewStatus === 'rejected' ? '#f87171' : cv ? '#fbbf24' : '#6b7280' }} />
