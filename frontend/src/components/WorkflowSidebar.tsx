@@ -95,6 +95,12 @@ export const WorkflowSidebar: React.FC<Props> = (p) => {
     const handler = () => {
       clearCloseTimer();
       setActiveSection('directorDesk');
+      // Position panel at a reasonable Y (near directorDesk icon in the dock)
+      const icon = document.querySelector('[data-testid="sidebar-icon-directorDesk"]');
+      if (icon) {
+        const rect = icon.getBoundingClientRect();
+        setPanelTop(rect.top - 4);
+      }
       setIsOpen(true);
     };
     window.addEventListener('open-director-console', handler);
