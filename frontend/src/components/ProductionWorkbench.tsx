@@ -13,7 +13,7 @@ import { ModelSettingsPanel } from './ModelSettingsPanel';
 import { type UserModelSettings } from '../types/modelSettings';
 import { loadUserModelSettings, saveUserModelSettings } from '../lib/userModelSettingsStore';
 import { getBuiltinVideoModels, findModelById } from '../lib/apimartClient';
-import { uploadImageToApimart, submitApimartVideoGeneration, pollApimartTask, buildApimartVideoRequest, type VideoGenerationTaskState, type ApimartUploadedImage } from '../lib/apimartGenerationClient';
+import { uploadImageToApimart, submitApimartVideoGeneration, pollApimartTask, buildApimartVideoRequest, sanitizeError, type VideoGenerationTaskState, type ApimartUploadedImage } from '../lib/apimartGenerationClient';
 // import removed: compositionOrder now uses store via prop chain (11A-Fix cleanup)
 
 type NodeStatus = 'pending' | 'running' | 'success' | 'failed';
@@ -458,7 +458,7 @@ export const ProductionWorkbench: React.FC = () => {
               updatedImageAssets[idx] = { ...updatedImageAssets[idx], remoteUrls: { ...updatedImageAssets[idx].remoteUrls, apimart: { url: r.url, uploadedAt: Date.now(), filename: r.filename, contentType: r.contentType, bytes: r.bytes } } };
             }
           } catch (e: any) {
-            throw new Error(`参考图上传失败: ${sanitizeStr(e?.message || '')}`);
+            throw new Error(`参考图上传失败: ${sanitizeError(e?.message || '')}`);
           }
         }
         setImageAssets(updatedImageAssets);
@@ -490,14 +490,14 @@ export const ProductionWorkbench: React.FC = () => {
           setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, taskId, status: 'failed', progress: 0, errorMessage: finalTask.errorMessage || '生成失败', warningMessages: warnings, updatedAt: Date.now() } }));
         }
       } catch (e: any) {
-        const errMsg = sanitizeStr(e?.message || '');
+        const errMsg = sanitizeError(e?.message || '');
         setError(errMsg);
         setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, status: 'failed', errorMessage: errMsg, updatedAt: Date.now() } }));
       }
     };
     // Fire and forget (poll loop handles async)
     runApimartGeneration().catch((e) => {
-      const errMsg = sanitizeStr(e?.message || '生成失败');
+      const errMsg = sanitizeError(e?.message || '生成失败');
       setError(errMsg);
       setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, status: 'failed', errorMessage: errMsg, updatedAt: Date.now() } }));
     });

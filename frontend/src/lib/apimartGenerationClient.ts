@@ -53,7 +53,7 @@ export interface VideoGenerationTaskState {
 const POLL_INTERVAL_MS = 2000;
 const MAX_POLL_ATTEMPTS = 90;
 
-function sanitizeError(e: any): string {
+export function sanitizeError(e: any): string {
   return e?.message || String(e || '').slice(0, 200);
 }
 
