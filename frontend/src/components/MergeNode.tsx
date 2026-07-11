@@ -25,6 +25,7 @@ export const MergeNode: React.FC<{ data?: MergeNodeData }> = ({ data }) => {
         ))}
       </div>
     )}
-    <button data-testid="merge-node-download-current-shots" disabled={!canMerge} className={`w-full mt-2 text-[8px] rounded px-2 py-1 ${canMerge ? 'bg-green-800/40 text-green-300' : 'bg-gray-800 text-gray-600'}`}>一键下载</button>
+    <button data-testid="open-director-console" onClick={() => window.dispatchEvent(new CustomEvent('open-director-console'))} className="w-full mt-1 text-[8px] rounded px-2 py-1 bg-purple-800/30 text-purple-300 border border-purple-500/20" title="打开导演台">导演台</button>
+    <button data-testid="merge-node-download-current-shots" disabled={!canMerge} className={`w-full mt-1 text-[8px] rounded px-2 py-1 ${canMerge ? 'bg-green-800/40 text-green-300' : 'bg-gray-800 text-gray-600'}`}>一键下载</button>
   </div>
 )};

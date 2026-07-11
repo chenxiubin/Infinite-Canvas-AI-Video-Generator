@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { GripVertical, Clock } from 'lucide-react';
-import { getTimelineDurations, setTimelineDurations } from '../lib/productionStateStore';
+import { useCompositionState } from '../hooks/useCompositionState';
 
 interface TimelineShot {
   shotKey: string;
@@ -31,8 +31,7 @@ const SectionCard: React.FC<{ title: string; icon: React.ReactNode; children: Re
   );
 
 export const VideoTimelineEditor: React.FC<Props> = ({ shots, onReorder, compositionOrder, instanceId }) => {
-  const [durations, setDurations] = useState<Record<string, number>>({});
-  React.useEffect(() => { if (instanceId) setDurations(getTimelineDurations(instanceId)); }, [instanceId]);
+  const { durations, updateDurations } = useCompositionState(instanceId || '');
   const [dragIdx, setDragIdx] = useState<number | null>(null);
 
   const orderedShots = (compositionOrder && compositionOrder.length > 0)
@@ -50,12 +49,9 @@ export const VideoTimelineEditor: React.FC<Props> = ({ shots, onReorder, composi
   const totalDuration = runningTotal;
 
   const saveDurations = useCallback((sk: string, val: number) => {
-    setDurations(prev => {
-      const next = { ...prev, [sk]: val };
-      if (instanceId) setTimelineDurations(instanceId, next);
-      return next;
-    });
-  }, []);
+    const next = { ...durations, [sk]: val };
+    updateDurations(next);
+  }, [durations, updateDurations]);
 
   const handleDragStart = (idx: number) => setDragIdx(idx);
 

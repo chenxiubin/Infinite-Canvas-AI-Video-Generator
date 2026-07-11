@@ -427,7 +427,7 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
               <div className="space-y-1.5">
                 {!node.node_id ? (
                   <div data-testid="single-shot-generate-disabled-reason" className="text-gray-600 text-[10px] text-center py-2">
-                    璇峰厛鐢熸垚鎵规
+                    请先生成批次
                   </div>
                 ) : (
                   <>

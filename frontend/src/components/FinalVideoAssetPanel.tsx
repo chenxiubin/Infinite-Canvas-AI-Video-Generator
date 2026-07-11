@@ -1,9 +1,6 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Film, CheckCircle, XCircle, Loader2, History, ArrowLeftRight } from 'lucide-react';
-import {
-  type FinalVideoVersion, getFinalVideoVersions, setFinalVideoVersions,
-  getCurrentFinalVideoId, setCurrentFinalVideoId,
-} from '../lib/productionStateStore';
+import { useFinalVideoAssets } from '../hooks/useFinalVideoAssets';
 
 interface Props {
   compositionStatus: 'idle' | 'processing' | 'completed' | 'failed';
@@ -22,47 +19,29 @@ const SectionCard: React.FC<{ title: string; icon: React.ReactNode; children: Re
   );
 
 export const FinalVideoAssetPanel: React.FC<Props> = ({ compositionStatus, instanceId }) => {
-  const [versions, setVersions] = useState<FinalVideoVersion[]>([]);
-  const [currentVersionId, setCurrentVersionId] = useState<string>('');
-  React.useEffect(() => { if (instanceId) { setVersions(getFinalVideoVersions(instanceId)); setCurrentVersionId(getCurrentFinalVideoId(instanceId)); } }, [instanceId]);
+  const { assets: versions, currentAsset: currentVersion, createAsset, switchCurrent, error: apiError } =
+    useFinalVideoAssets(instanceId || '');
 
-  const saveVersions = (v: FinalVideoVersion[]) => {
-    setVersions(v);
-    if (instanceId) setFinalVideoVersions(instanceId, v);
-  };
-
-  const currentVersion = versions.find(v => v.versionId === currentVersionId) || versions[versions.length - 1];
-
-  // When composition completes, automatically add a new version
+  // TODO(11B): Move asset creation to backend Worker (completion handler).
+  // Currently frontend-driven — will not trigger if page is closed.
+  // When composition completes, auto-create a new final video asset via backend
   React.useEffect(() => {
-    if (compositionStatus !== 'completed') return;
-    const job = instanceId ? getCompositionJob(instanceId) : { status: 'idle' };
-    if (!job.completedAt) return;
-    const existingVersion = versions.find(v => v.createdAt === job.completedAt);
-    if (existingVersion) return;
-    const newVersion: FinalVideoVersion = {
-      versionId: `final-v${versions.length + 1}`,
-      videoUrl: `/mock/final-video-${versions.length + 1}.mp4`,
-      createdAt: job.completedAt,
-      status: 'completed',
-    };
-    const updated = [...versions, newVersion];
-    saveVersions(updated);
-    const newId = newVersion.versionId;
-    setCurrentVersionId(newId);
-    if (instanceId) setCurrentFinalVideoId(instanceId, newId);
+    if (compositionStatus !== 'completed' || !instanceId) return;
+    const existing = versions.find(v => v.status === 'completed' && Date.now() - v.createdAt < 60000);
+    if (!existing) {
+      createAsset('/mock/final-video.mp4').catch(() => {});
+    }
   }, [compositionStatus, instanceId]);
-
-  const switchVersion = (versionId: string) => {
-    setCurrentVersionId(versionId);
-    if (instanceId) setCurrentFinalVideoId(instanceId, versionId);
-  };
 
   if (compositionStatus === 'idle') return null;
 
   return (
     <SectionCard title="最终视频" icon={<Film className="w-3 h-3" />}>
       <div data-testid="final-video-asset-panel" className="space-y-2">
+        {/* API status indicator */}
+        {apiError && (
+          <div className="text-[8px] text-amber-500">后端不可用，使用本地缓存</div>
+        )}
         {/* Status */}
         <div data-testid="final-video-status" className={`text-[10px] px-2 py-1.5 rounded border ${
           compositionStatus === 'completed' ? 'text-green-300 bg-green-900/20 border-green-500/20' :
@@ -91,15 +70,15 @@ export const FinalVideoAssetPanel: React.FC<Props> = ({ compositionStatus, insta
             {[...versions].reverse().map(v => (
               <div key={v.versionId} data-testid={`final-version-${v.versionId}`}
                 className={`flex items-center gap-2 text-[8px] px-2 py-1 rounded border cursor-pointer transition-colors ${
-                  currentVersionId === v.versionId ? 'bg-purple-900/20 border-purple-500/30' : 'bg-[#0a0f1a] border-white/5 hover:border-white/10'
+                  currentVersion?.versionId === v.versionId ? 'bg-purple-900/20 border-purple-500/30' : 'bg-[#0a0f1a] border-white/5 hover:border-white/10'
                 }`}
-                onClick={() => switchVersion(v.versionId)}>
+                onClick={() => switchCurrent(v.versionId)}>
                 <span className={v.status === 'completed' ? 'text-green-400' : 'text-red-400'}>
                   {v.status === 'completed' ? <CheckCircle className="w-2.5 h-2.5" /> : <XCircle className="w-2.5 h-2.5" />}
                 </span>
                 <span className="text-gray-400">{v.versionId}</span>
                 <span className="text-gray-600 flex-1">{new Date(v.createdAt).toLocaleTimeString()}</span>
-                {currentVersionId === v.versionId && (
+                {currentVersion?.versionId === v.versionId && (
                   <span data-testid={`final-version-current-${v.versionId}`} className="text-purple-300 flex items-center gap-0.5">
                     <ArrowLeftRight className="w-2 h-2" />当前
                   </span>

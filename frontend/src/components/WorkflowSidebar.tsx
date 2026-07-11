@@ -86,6 +86,17 @@ export const WorkflowSidebar: React.FC<Props> = (p) => {
     return () => { if (closeTimerRef.current) clearTimeout(closeTimerRef.current); };
   }, []);
 
+  // Listen for custom event from MergeNode's "导演台" button to open directorDesk section
+  useEffect(() => {
+    const handler = () => {
+      clearCloseTimer();
+      setActiveSection('directorDesk');
+      setIsOpen(true);
+    };
+    window.addEventListener('open-director-console', handler);
+    return () => window.removeEventListener('open-director-console', handler);
+  }, [clearCloseTimer]);
+
   const clearCloseTimer = useCallback(() => {
     if (closeTimerRef.current) { clearTimeout(closeTimerRef.current); closeTimerRef.current = null; }
   }, []);

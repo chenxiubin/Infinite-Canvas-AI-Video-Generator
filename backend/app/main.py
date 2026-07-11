@@ -74,6 +74,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Sprint 11A-2: Composition API router
+try:
+    from .routers.composition import router as composition_router
+except ImportError:
+    from routers.composition import router as composition_router
+app.include_router(composition_router)
+
+# Sprint 11A-3: Video Asset API router
+try:
+    from .routers.video_assets import router as video_assets_router
+except ImportError:
+    from routers.video_assets import router as video_assets_router
+app.include_router(video_assets_router)
+
+# Sprint 11C: Provider API router
+try:
+    from .routers.providers import router as providers_router
+except ImportError:
+    from routers.providers import router as providers_router
+app.include_router(providers_router)
+
 # Database Setup
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -507,6 +528,21 @@ def init_db():
     FROM video_instance_nodes vin WHERE vin.bound_asset_id IS NOT NULL AND vin.bound_asset_id!='' AND NOT EXISTS (SELECT 1 FROM video_node_asset_bindings vnab WHERE vnab.instance_id=vin.instance_id AND vnab.shot_key=vin.shot_key AND vnab.binding_type='start_frame')""")
 
     conn.commit()
+
+    # Sprint 11A-1: run registered schema migrations
+    try:
+        from .db.migrations import run_migrations
+        from .db import sprint_11a  # noqa: F401 — registers migration
+        from .db import sprint_11a3  # noqa: F401 — registers migration
+        from .db import sprint_11b4  # noqa: F401 — registers migration
+        from .db import sprint_11c  # noqa: F401 — registers migration
+        from .db import sprint_11e1  # noqa: F401 — registers migration
+        new_migrations = run_migrations(cursor)
+        conn.commit()
+        if new_migrations:
+            print(f"[init_db] Applied migrations: {', '.join(new_migrations)}")
+    except Exception as e:
+        print(f"[init_db] Migration warning: {e}")
 
     # Seed default video templates (MVP-3 Sprint 2)
     try:

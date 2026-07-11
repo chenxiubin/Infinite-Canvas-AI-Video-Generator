@@ -14,7 +14,7 @@ import { type UserModelSettings } from '../types/modelSettings';
 import { loadUserModelSettings, saveUserModelSettings } from '../lib/userModelSettingsStore';
 import { getBuiltinVideoModels, findModelById } from '../lib/apimartClient';
 import { uploadImageToApimart, submitApimartVideoGeneration, pollApimartTask, buildApimartVideoRequest, type VideoGenerationTaskState, type ApimartUploadedImage } from '../lib/apimartGenerationClient';
-import { getCompositionOrder, setCompositionOrder as saveCompositionOrder } from '../lib/productionStateStore';
+// import removed: compositionOrder now uses store via prop chain (11A-Fix cleanup)
 
 type NodeStatus = 'pending' | 'running' | 'success' | 'failed';
 interface NodeItem { node_id: string; shot_key: string; status: NodeStatus; [key: string]: any }
@@ -62,13 +62,12 @@ export const ProductionWorkbench: React.FC = () => {
   const [videoAssetsByShot, setVideoAssetsByShot] = useState<Record<string, VideoAssetVersion[]>>({});
   const [currentVideoByShot, setCurrentVideoByShot] = useState<Record<string, string>>({});
   const instanceId = instance?.instance_id || '';
-  // 10L-2: Director Console — composition shot order (instance-scoped store)
+  // 11A-Fix: compositionOrder now managed by useCompositionState hook in child components.
+  // ProductionWorkbench only passes through as props — no direct store access.
   const [compositionOrder, setCompositionOrder] = useState<string[]>([]);
-  useEffect(() => { if (instanceId) setCompositionOrder(getCompositionOrder(instanceId)); }, [instanceId]);
   const handleSaveCompositionOrder = useCallback((order: string[]) => {
     setCompositionOrder(order);
-    if (instanceId) saveCompositionOrder(instanceId, order);
-  }, [instanceId]);
+  }, []);
   // 10K-1: Model settings
   const [userModelSettings, setUserModelSettings] = useState<UserModelSettings>(loadUserModelSettings);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
@@ -347,6 +346,8 @@ export const ProductionWorkbench: React.FC = () => {
         if (result.status === 'success' && result.video_url) {
           const shotName = (shotReferences || {})[shotKey]?.[0]?.shot_name || shotKey;
           addVideoToLibrary(shotKey, shotName, result.video_url, 'single-generate', 'pending', 'mock', 'mock');
+          // 11E-1: Persist to backend video_asset_versions table
+          persistVideoToBackend(instanceId, shotKey, result.video_url, 'mock');
         }
         setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, status: 'success', progress: 100, updatedAt: Date.now() } }));
       } catch (e: any) {
@@ -421,6 +422,8 @@ export const ProductionWorkbench: React.FC = () => {
 
         if (finalTask.status === 'success' && finalTask.videoUrl) {
           addVideoToLibrary(shotKey, shotName, finalTask.videoUrl, 'apimart-generate', 'pending', 'apimart', userModelSettings.selectedVideoModelId);
+          // 11E-1: Persist to backend
+          persistVideoToBackend(instanceId, shotKey, finalTask.videoUrl, 'apimart');
           setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, taskId, status: 'success', progress: 100, warningMessages: warnings, updatedAt: Date.now() } }));
         } else {
           setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, taskId, status: 'failed', progress: 0, errorMessage: finalTask.errorMessage || '生成失败', warningMessages: warnings, updatedAt: Date.now() } }));
@@ -447,6 +450,30 @@ export const ProductionWorkbench: React.FC = () => {
   };
 
   // 10L-1: Approve a specific video version in the library
+  // 11E-1: Persist video asset to backend table (fire-and-forget)
+  const persistVideoToBackend = (iid: string, sk: string, videoUrl: string, provider: string) => {
+    if (!iid) return;
+    fetch(`/api/v1/video-assets/${iid}/${sk}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ video_url: videoUrl, provider, model: userModelSettings.selectedVideoModelId }),
+    }).catch(() => {});
+  };
+
+  // 11E-1: Sync review status to backend (find latest version for this shot)
+  const syncReviewToBackend = (sk: string, status: string, reason?: string) => {
+    if (!instanceId) return;
+    fetch(`/api/v1/video-assets/${instanceId}/${sk}`).then(r => r.json()).then(data => {
+      const latest = data.latest;
+      if (latest?.id) {
+        fetch(`/api/v1/video-assets/versions/${latest.id}/review`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ review_status: status, review_reason: reason || '' }),
+        }).catch(() => {});
+      }
+    }).catch(() => {});
+  };
+
   const handleApproveVideo = useCallback((shotKey: string, videoId: string) => {
     setVideoAssetsByShot(prev => {
       const versions = prev[shotKey];
@@ -460,7 +487,9 @@ export const ProductionWorkbench: React.FC = () => {
         ),
       };
     });
-  }, []);
+    // 11E-1: Sync review to backend
+    if (instanceId) syncReviewToBackend(shotKey, 'approved');
+  }, [instanceId]);
 
   // 10L-1: Reject a specific video version in the library with a reason
   const handleRejectVideo = useCallback((shotKey: string, videoId: string, reason: string) => {
@@ -476,7 +505,8 @@ export const ProductionWorkbench: React.FC = () => {
         ),
       };
     });
-  }, []);
+    if (instanceId) syncReviewToBackend(shotKey, 'rejected', reason);
+  }, [instanceId]);
 
   const handleRegenerateShot = async (nodeId: string, shotKey: string) => {
     if (!nodeId) return;

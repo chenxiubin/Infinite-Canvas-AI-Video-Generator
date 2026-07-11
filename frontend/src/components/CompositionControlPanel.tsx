@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Play, CheckCircle, Loader2, AlertTriangle, XCircle } from 'lucide-react';
 import { FinalVideoAssetPanel } from './FinalVideoAssetPanel';
-import { type CompositionJob, getCompositionJob, setCompositionJob } from '../lib/productionStateStore';
+import { useCompositionJob } from '../hooks/useCompositionJob';
 
 interface Props {
   shotCount: number;
@@ -22,30 +22,22 @@ const SectionCard: React.FC<{ title: string; icon: React.ReactNode; children: Re
   );
 
 export const CompositionControlPanel: React.FC<Props> = ({ shotCount, totalDuration, allApproved, instanceId }) => {
-  const [job, setJob] = useState<CompositionJob>({ status: 'idle' });
-  React.useEffect(() => { if (instanceId) setJob(getCompositionJob(instanceId)); }, [instanceId]);
-
-  const saveJob = (next: CompositionJob) => {
-    setJob(next);
-    if (instanceId) setCompositionJob(instanceId, next);
-  };
+  const { job, createJob, isProcessing, isCompleted, isFailed, error } = useCompositionJob(instanceId || '');
 
   const handleStart = () => {
     if (!allApproved) return;
-    const now = Date.now();
-    saveJob({ status: 'processing', startedAt: now });
-    // Simulate processing → completed after delay
-    setTimeout(() => {
-      saveJob({ status: 'completed', startedAt: now, completedAt: Date.now() });
-    }, 3000);
+    createJob();
   };
 
   const handleReset = () => {
-    saveJob({ status: 'idle' });
+    // Reset handled by creating a new job
+    createJob();
   };
 
+  const currentStatus = job?.status || 'idle';
+
   const statusIcon = () => {
-    switch (job.status) {
+    switch (currentStatus) {
       case 'idle': return <Play className="w-3 h-3" />;
       case 'processing': return <Loader2 className="w-3 h-3 animate-spin" />;
       case 'completed': return <CheckCircle className="w-3 h-3" />;
@@ -55,7 +47,7 @@ export const CompositionControlPanel: React.FC<Props> = ({ shotCount, totalDurat
   };
 
   const statusLabel = () => {
-    switch (job.status) {
+    switch (currentStatus) {
       case 'idle': return '等待开始';
       case 'processing': return '合成中...';
       case 'completed': return '合成完成';
@@ -64,25 +56,22 @@ export const CompositionControlPanel: React.FC<Props> = ({ shotCount, totalDurat
     }
   };
 
-  return (
+  return (<>
     <SectionCard title="合成任务" icon={<Play className="w-3 h-3" />}>
       <div data-testid="composition-control-panel">
-        {/* Info */}
         <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[9px] bg-[#0a0f1a] rounded p-2 border border-white/5">
           <div className="text-gray-600">分镜数量</div><div data-testid="comp-job-shot-count" className="text-gray-300">{shotCount}</div>
           <div className="text-gray-600">总时长</div><div data-testid="comp-job-duration" className="text-gray-300">{totalDuration}秒</div>
         </div>
 
-        {/* Status */}
-        <div data-testid="comp-job-status" className={`flex items-center gap-1.5 text-[10px] px-2 py-1.5 rounded border ${job.status === 'completed' ? 'text-green-300 bg-green-900/20 border-green-500/20' : job.status === 'processing' ? 'text-blue-300 bg-blue-900/20 border-blue-500/20' : job.status === 'failed' ? 'text-red-300 bg-red-900/20 border-red-500/20' : 'text-gray-400 bg-gray-900/20 border-gray-600/20'}`}>
+        <div data-testid="comp-job-status" className={`flex items-center gap-1.5 text-[10px] px-2 py-1.5 rounded border ${currentStatus === 'completed' ? 'text-green-300 bg-green-900/20 border-green-500/20' : currentStatus === 'processing' ? 'text-blue-300 bg-blue-900/20 border-blue-500/20' : currentStatus === 'failed' ? 'text-red-300 bg-red-900/20 border-red-500/20' : 'text-gray-400 bg-gray-900/20 border-gray-600/20'}`}>
           {statusIcon()}
           <span data-testid="composition-job-status">{statusLabel()}</span>
-          {job.status === 'idle' && <span className="text-[8px] text-gray-500">— 等待开始合成</span>}
-          {job.status === 'processing' && <span className="text-[8px] text-blue-400 animate-pulse">处理中...</span>}
+          {currentStatus === 'idle' && <span className="text-[8px] text-gray-500">— 等待开始合成</span>}
+          {currentStatus === 'processing' && <span className="text-[8px] text-blue-400 animate-pulse">处理中...</span>}
         </div>
 
-        {/* Actions */}
-        {(job.status === 'idle' || job.status === 'failed') && (
+        {(currentStatus === 'idle' || currentStatus === 'failed') && (
           <button
             data-testid="comp-job-start-button"
             onClick={handleStart}
@@ -95,13 +84,13 @@ export const CompositionControlPanel: React.FC<Props> = ({ shotCount, totalDurat
           </button>
         )}
 
-        {job.status === 'processing' && (
+        {currentStatus === 'processing' && (
           <div data-testid="comp-job-processing" className="text-blue-400 text-[9px] text-center">
             正在合成视频，请稍候...
           </div>
         )}
 
-        {job.status === 'completed' && (
+        {currentStatus === 'completed' && (
           <div className="space-y-1">
             <div data-testid="comp-job-completed" className="text-green-400 text-[9px] text-center">
               合成完成
@@ -115,7 +104,7 @@ export const CompositionControlPanel: React.FC<Props> = ({ shotCount, totalDurat
           </div>
         )}
 
-        {!allApproved && job.status === 'idle' && (
+        {!allApproved && currentStatus === 'idle' && (
           <div data-testid="comp-job-blocked-reason" className="flex items-center gap-1 text-[8px] text-amber-400">
             <AlertTriangle className="w-2.5 h-2.5 flex-shrink-0" />
             全部分镜审核通过后才能开始合成
@@ -123,8 +112,8 @@ export const CompositionControlPanel: React.FC<Props> = ({ shotCount, totalDurat
         )}
       </div>
     </SectionCard>
-    {(job.status === 'processing' || job.status === 'completed' || job.status === 'failed') && (
-      <FinalVideoAssetPanel compositionStatus={job.status} instanceId={instanceId} />
+    {(currentStatus === 'processing' || currentStatus === 'completed' || currentStatus === 'failed') && (
+      <FinalVideoAssetPanel compositionStatus={currentStatus} instanceId={instanceId} />
     )}
   </>);
 };
