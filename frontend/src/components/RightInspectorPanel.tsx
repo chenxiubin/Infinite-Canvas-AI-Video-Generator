@@ -436,8 +436,6 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
                     className="flex items-center justify-center gap-1.5 bg-purple-900/40 hover:bg-purple-900/60 text-purple-300 text-xs px-3 py-2 rounded-lg w-full transition-colors border border-purple-700/20 font-medium disabled:opacity-30 disabled:cursor-not-allowed">
                     <Play className="w-3 h-3" /> 生成此分镜
                   </button>
-                    )}
-                  </>
                 )}
                 {false && (
                   <div className="text-gray-600 text-[10px] text-center py-2">节点完成后可进行操作</div>
