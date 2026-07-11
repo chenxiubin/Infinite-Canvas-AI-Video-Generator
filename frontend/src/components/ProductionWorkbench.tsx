@@ -14,6 +14,7 @@ import { type UserModelSettings } from '../types/modelSettings';
 import { loadUserModelSettings, saveUserModelSettings } from '../lib/userModelSettingsStore';
 import { getBuiltinVideoModels, findModelById } from '../lib/apimartClient';
 import { uploadImageToApimart, submitApimartVideoGeneration, pollApimartTask, buildApimartVideoRequest, type VideoGenerationTaskState, type ApimartUploadedImage } from '../lib/apimartGenerationClient';
+import { getCompositionOrder, setCompositionOrder as saveCompositionOrder } from '../lib/productionStateStore';
 
 type NodeStatus = 'pending' | 'running' | 'success' | 'failed';
 interface NodeItem { node_id: string; shot_key: string; status: NodeStatus; [key: string]: any }
@@ -29,7 +30,7 @@ interface ImageAsset { id: string; name: string; url: string; mimeType: string; 
 interface FreeRefNode { id: string; imageAssetId: string; position: { x: number; y: number }; }
 
 // 10I: Video asset version — stored in front-end mock library
-interface VideoAssetVersion { id: string; shotKey: string; shotTitle: string; productLine: string; videoUrl: string; thumbnailUrl?: string; createdAt: number; versionLabel: string; reviewStatus: 'pending'|'approved'|'rejected'; rejectReason?: string; source: 'single-generate'|'full-demo'|'history-restore'; }
+interface VideoAssetVersion { id: string; shotKey: string; shotTitle: string; productLine: string; videoUrl: string; thumbnailUrl?: string; createdAt: number; versionLabel: string; reviewStatus: 'pending'|'approved'|'rejected'; rejectReason?: string; source: 'single-generate'|'apimart-generate'|'history-restore'; provider?: 'mock' | 'apimart'; model?: string; reviewReason?: string; reviewedAt?: number; }
 
 // 10E: Per-shot reference image list derived from canvas connections
 interface ShotReferenceItem {
@@ -60,6 +61,14 @@ export const ProductionWorkbench: React.FC = () => {
   // 10I: Video asset library
   const [videoAssetsByShot, setVideoAssetsByShot] = useState<Record<string, VideoAssetVersion[]>>({});
   const [currentVideoByShot, setCurrentVideoByShot] = useState<Record<string, string>>({});
+  const instanceId = instance?.instance_id || '';
+  // 10L-2: Director Console — composition shot order (instance-scoped store)
+  const [compositionOrder, setCompositionOrder] = useState<string[]>([]);
+  useEffect(() => { if (instanceId) setCompositionOrder(getCompositionOrder(instanceId)); }, [instanceId]);
+  const handleSaveCompositionOrder = useCallback((order: string[]) => {
+    setCompositionOrder(order);
+    if (instanceId) saveCompositionOrder(instanceId, order);
+  }, [instanceId]);
   // 10K-1: Model settings
   const [userModelSettings, setUserModelSettings] = useState<UserModelSettings>(loadUserModelSettings);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
@@ -177,6 +186,18 @@ export const ProductionWorkbench: React.FC = () => {
   const handleSelectNode = useCallback((n: any) => { setSelectedNodeId(n?.node_id || n?.shot_key || null); }, []);
 
   useEffect(() => { api.listVideoTemplates().then(d => setTemplates(d.templates || [])).catch((e) => console.warn('Templates load failed:', e?.message)); api.listModelAdapters().then(d => setAdapters(d.adapters || [])).catch((e) => console.warn('Adapters load failed:', e?.message)); }, []);
+  // Deep-link: auto-load instance from URL hash (e.g. /#instance=<instance_id>).
+  // Allows returning to in-progress work after page reload or sharing instance links.
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (!hash.startsWith('#instance=')) return;
+    const iid = hash.slice('#instance='.length);
+    if (!iid) return;
+    setLoading('加载工作实例...');
+    loadInstance(iid)
+      .then(() => setLoading(''))
+      .catch((e) => { setError('无法加载指定实例: ' + (e?.message || '未知错误')); setLoading(''); });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (selectedNodeId) return;
     setSelectedNodeId(productLine === 'wall_calendar' ? 'W01_main' : 'S01_main');
@@ -202,7 +223,7 @@ export const ProductionWorkbench: React.FC = () => {
       const isWall = productLine === 'wall_calendar';
       const shotKeys = [...(isWall ? SHOT_KEYS_WALL : SHOT_KEYS_DESK), ...(optionalShotEnabled ? (isWall ? ['W08_size_ref'] : ['S07_size_ref']) : [])];
       const shotNames: Record<string,string> = isWall ? {W01_main:'挂历-正面展示',W02_hanging:'上墙悬挂展示',W03_detail1:'纸张与印刷细节',W04_detail2:'装订与挂孔结构',W05_scene:'家居/办公墙面场景',W06_size:'尺寸与空间比例',W07_brand:'收尾-品牌',W08_size_ref:'尺寸参考同框'} : {S01_main:'主图-正面',S02_detail1:'细节特写-材质',S03_detail2:'细节特写-结构',S04_motion:'运镜展示',S05_scene:'场景陈列',S06_brand:'收尾-品牌',S07_size_ref:'尺寸参考同框'};
-      shotKeys.forEach(sk => { addVideoToLibrary(sk, shotNames[sk] || sk, '/mock/demo-video.mp4', 'full-demo', 'approved'); });
+      shotKeys.forEach(sk => { addVideoToLibrary(sk, shotNames[sk] || sk, '/mock/demo-video.mp4', 'single-generate', 'approved', 'mock', 'mock'); });
       await api.reviewInstance(fb.instances[0].instance_id, 'approve');
       const ri = await api.getVideoInstance(fb.instances[0].instance_id);
       setInstance(ri); setNodes(ri.nodes || []); addLog('review approved');
@@ -325,7 +346,7 @@ export const ProductionWorkbench: React.FC = () => {
         setNodes(prev => prev.map(n => n.shot_key === shotKey ? { ...n, status: result.status, video_url: result.video_url, cover_url: result.cover_url } : n));
         if (result.status === 'success' && result.video_url) {
           const shotName = (shotReferences || {})[shotKey]?.[0]?.shot_name || shotKey;
-          addVideoToLibrary(shotKey, shotName, result.video_url, 'single-generate', 'pending');
+          addVideoToLibrary(shotKey, shotName, result.video_url, 'single-generate', 'pending', 'mock', 'mock');
         }
         setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, status: 'success', progress: 100, updatedAt: Date.now() } }));
       } catch (e: any) {
@@ -399,7 +420,7 @@ export const ProductionWorkbench: React.FC = () => {
         });
 
         if (finalTask.status === 'success' && finalTask.videoUrl) {
-          addVideoToLibrary(shotKey, shotName, finalTask.videoUrl, 'apimart-generate', 'pending');
+          addVideoToLibrary(shotKey, shotName, finalTask.videoUrl, 'apimart-generate', 'pending', 'apimart', userModelSettings.selectedVideoModelId);
           setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, taskId, status: 'success', progress: 100, warningMessages: warnings, updatedAt: Date.now() } }));
         } else {
           setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, taskId, status: 'failed', progress: 0, errorMessage: finalTask.errorMessage || '生成失败', warningMessages: warnings, updatedAt: Date.now() } }));
@@ -425,17 +446,50 @@ export const ProductionWorkbench: React.FC = () => {
     }
   };
 
+  // 10L-1: Approve a specific video version in the library
+  const handleApproveVideo = useCallback((shotKey: string, videoId: string) => {
+    setVideoAssetsByShot(prev => {
+      const versions = prev[shotKey];
+      if (!versions) return prev;
+      return {
+        ...prev,
+        [shotKey]: versions.map(v =>
+          v.id === videoId
+            ? { ...v, reviewStatus: 'approved' as const, reviewReason: undefined, reviewedAt: Date.now() }
+            : v
+        ),
+      };
+    });
+  }, []);
+
+  // 10L-1: Reject a specific video version in the library with a reason
+  const handleRejectVideo = useCallback((shotKey: string, videoId: string, reason: string) => {
+    setVideoAssetsByShot(prev => {
+      const versions = prev[shotKey];
+      if (!versions) return prev;
+      return {
+        ...prev,
+        [shotKey]: versions.map(v =>
+          v.id === videoId
+            ? { ...v, reviewStatus: 'rejected' as const, reviewReason: reason, reviewedAt: Date.now() }
+            : v
+        ),
+      };
+    });
+  }, []);
+
   const handleRegenerateShot = async (nodeId: string, shotKey: string) => {
     if (!nodeId) return;
-    setGeneratingShotKeys(prev => [...prev, shotKey]);
+    // Delegate to full generation pipeline (Mock + APIMart), which handles
+    // generatingShotKeys, addVideoToLibrary (creates v2 pending on success),
+    // videoGenerationTasks, and node updates.
+    // On success: addVideoToLibrary creates v2 pending, sets as current.
+    // On failure: old version remains current with original reviewStatus.
+    // Does NOT prematurely modify review_status — the existing rejected version
+    // stays rejected until a new version is successfully created.
     try {
-      const config = (storyboardConfigs || {})[shotKey] || getDefaultStoryboardConfig(shotKey, productLine, motionShotVersion);
-      const prompt = buildFinalPrompt(config);
-      // Force regenerate for rejected/failed nodes
-      const result = await api.generateVideoNode(nodeId, { prompt, force: true });
-      setNodes(prev => prev.map(n => n.shot_key === shotKey ? { ...n, status: result.status, video_url: result.video_url, cover_url: result.cover_url, review_status: result.status === 'success' ? 'pending' : n.review_status, review_reason: '' } : n));
+      await handleGenerateSingleShot(nodeId, shotKey);
     } catch (e: any) { setError(e?.message || '重新生成失败'); }
-    finally { setGeneratingShotKeys(prev => prev.filter(k => k !== shotKey)); }
   };
   const selectedBinding = shotBindings.find(b => b.shotKey === selectedNode?.shot_key);
   const getBoundAsset = (assetId?: string) => assets.find(a => a.id === assetId);
@@ -535,14 +589,14 @@ export const ProductionWorkbench: React.FC = () => {
   }, []);
 
   // 10I: Add video to library and set as current (functional setState to avoid stale closure)
-  const addVideoToLibrary = useCallback((shotKey: string, shotTitle: string, videoUrl: string, source: 'single-generate'|'full-demo', reviewStatus: 'pending'|'approved' = 'pending') => {
+  const addVideoToLibrary = useCallback((shotKey: string, shotTitle: string, videoUrl: string, source: 'single-generate'|'apimart-generate'|'history-restore', reviewStatus: 'pending'|'approved' = 'pending', provider?: 'mock' | 'apimart', model?: string) => {
     const versionId = `vid_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
     setVideoAssetsByShot(prev => {
       const nextVersions = [...(prev[shotKey] || []), {
         id: versionId, shotKey, shotTitle, productLine,
         videoUrl, createdAt: Date.now(),
         versionLabel: `v${(prev[shotKey] || []).length + 1}`,
-        reviewStatus, source,
+        reviewStatus, source, provider, model,
       }];
       return { ...prev, [shotKey]: nextVersions };
     });
@@ -669,7 +723,7 @@ export const ProductionWorkbench: React.FC = () => {
     <React.Fragment>
     <div data-testid="mvp3-workbench" className="flex flex-col h-screen bg-[#0a0f1a] text-gray-200 font-sans overflow-hidden">
       {/* Header — fixed height */}
-      <WorkbenchHeader modelAdapter={modelAdapter} adapters={adapters} onSetModelAdapter={setModelAdapter} onRunDemo={handleFullDemo} onReset={handleReset} loading={loading} onClearAllRefImages={handleClearAllFixedReferenceImages}
+      <WorkbenchHeader modelAdapter={modelAdapter} adapters={adapters} onSetModelAdapter={setModelAdapter} onReset={handleReset} loading={loading} onClearAllRefImages={handleClearAllFixedReferenceImages}
         modelSettingsLabel={modelSettingsLabel}
         onOpenModelSettings={() => setModelSettingsOpen(true)}
       />
@@ -707,6 +761,8 @@ export const ProductionWorkbench: React.FC = () => {
             videoAssetsByShot={videoAssetsByShot}
             currentVideoByShot={currentVideoByShot}
             onSetCurrentVideo={handleSetCurrentVideo}
+            compositionOrder={compositionOrder}
+            onSetCompositionOrder={handleSaveCompositionOrder}
           />
         </div>
 
@@ -762,6 +818,8 @@ export const ProductionWorkbench: React.FC = () => {
             onSetShotBatchCount={(sk, n) => setShotBatchCounts(prev => ({ ...prev, [sk]: n }))}
             videoAssetsByShot={videoAssetsByShot}
             currentVideoByShot={currentVideoByShot}
+            onApproveVideo={handleApproveVideo}
+            onRejectVideo={handleRejectVideo}
           />
         </div>
       </div>

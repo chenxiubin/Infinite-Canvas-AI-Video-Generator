@@ -163,7 +163,7 @@ test.describe('MVP-4 10K-1 APIMart Model Settings', () => {
     await expect(page.getByTestId('apimart-default-duration')).toHaveValue('8');
   });
 
-  test('K1-13: generate stores payload summary without apiKey', async ({ page }) => {
+  test('K1-13: generate stores payload summary without apiKey', async ({ page, request }) => {
     test.setTimeout(90000);
     // Mock APIMart for successful generation
     await page.route('**/api.apimart.ai/**', async (route) => {
@@ -182,19 +182,29 @@ test.describe('MVP-4 10K-1 APIMart Model Settings', () => {
     await page.getByTestId('apimart-default-duration').selectOption('8');
     await closeSettings(page);
 
-    // Run demo
-    await page.getByTestId('run-full-demo-button').click();
-    await expect(page.getByTestId('production-status-compact')).toBeAttached({ timeout: 30000 });
-    await expect(page.getByTestId('merge-node-status')).toContainText('已通过', { timeout: 10000 });
-
-    await expect(page.getByTestId('canvas-detail-shot-key')).toContainText('S01_main', { timeout: 5000 });
-    await expect(page.getByTestId('inspector-generate-shot-S01_main')).toBeVisible({ timeout: 10000 });
+    // API batch setup
+    const sku2 = 'K1x-'+Date.now(); const prod2 = await request.post('/api/v1/products',{data:{product_type:'desk_calendar',sku:sku2,title:'K1 '+sku2}});
+    const pid2 = (await prod2.json()).product_id;
+    for(const r2 of['main','detail1','detail2','scene','brand']){await request.post('/api/v1/products/'+pid2+'/assets',{data:{original_filename:sku2+'_'+r2+'.jpg',file_url:'/mock/'+sku2+'_'+r2+'.jpg'}});}
+    const pd2=await request.get('/api/v1/products/'+pid2);for(const a2 of((await pd2.json()).assets||[])){if(a2.role_key&&a2.role_key!=='unrecognized')await request.put('/api/v1/products/'+pid2+'/assets/'+a2.asset_id+'/role',{data:{role_key:a2.role_key}});}
+    const tmpl2=await request.get('/api/v1/video-templates?product_type=desk_calendar');const tid2=(await tmpl2.json()).templates[0].template_id;
+    const batchResp2 = await request.post('/api/v1/video-batches',{data:{template_id:tid2,product_ids:[pid2]}});
+    const iid2 = (await batchResp2.json()).instances[0].instance_id;
+    await page.goto('about:blank');
+    await page.goto(`/#instance=${iid2}`);
+    await expect(page.getByTestId('mvp3-workbench')).toBeVisible({timeout:10000});
+    const s01Node = page.getByTestId('shot-control-node-S01_main');
+    await s01Node.scrollIntoViewIfNeeded();
+    await expect(s01Node).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId('canvas-detail-shot-key')).toContainText('S01_main', { timeout: 8000 });
+    await expect(page.getByTestId('inspector-generate-shot-S01_main')).toBeVisible({ timeout: 15000 });
     await page.getByTestId('inspector-generate-shot-S01_main').click();
+    await expect(page.getByTestId('inspector-current-video')).toBeVisible({ timeout: 30000 });
 
-    // Wait for v2 to appear
+    // Verify v1 exists
     await page.getByTestId('sidebar-icon-assets').hover();
     await page.getByTestId('asset-tab-video').click();
-    await expect(page.getByTestId('video-version-card-S01_main-v2')).toBeAttached({ timeout: 10000 });
+    await expect(page.getByTestId('video-version-card-S01_main-v1')).toBeAttached({ timeout: 10000 });
 
     // Read payload summary from hidden test div
     const summary = page.getByTestId('last-generate-payload-summary');

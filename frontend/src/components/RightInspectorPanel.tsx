@@ -47,6 +47,9 @@ interface Props {
   // 10I: Video asset library for video preview
   videoAssetsByShot?: Record<string, any[]>;
   currentVideoByShot?: Record<string, string>;
+  // 10L-1: Video review callbacks
+  onApproveVideo?: (shotKey: string, videoId: string) => void;
+  onRejectVideo?: (shotKey: string, videoId: string, reason: string) => void;
 }
 
 const reviewBadgeCls: Record<string, string> = {
@@ -63,11 +66,12 @@ const statusBadgeCls: Record<string, string> = {
   failed: 'text-red-400 bg-red-900/30 border-red-500/30',
 };
 
-export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefresh, instance, modelAdapter, batchStatus, nodeCount, assets, selectedBinding, getBoundAsset, onBindShotFrame, onGenerateSingleShot, onRegenerateShot, onReviewAction, generatingShotKeys, storyboardConfigs, onUpdateStoryboardConfig, motionShotVersion, onSetMotionShotVersion, productLine, shotReferences, onMoveShotRefOrder, onDragSortOrder, shotBatchCounts, onSetShotBatchCount, videoAssetsByShot, currentVideoByShot }) => {
+export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefresh, instance, modelAdapter, batchStatus, nodeCount, assets, selectedBinding, getBoundAsset, onBindShotFrame, onGenerateSingleShot, onRegenerateShot, onReviewAction, generatingShotKeys, storyboardConfigs, onUpdateStoryboardConfig, motionShotVersion, onSetMotionShotVersion, productLine, shotReferences, onMoveShotRefOrder, onDragSortOrder, shotBatchCounts, onSetShotBatchCount, videoAssetsByShot, currentVideoByShot, onApproveVideo, onRejectVideo }) => {
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [inspectorMode, setInspectorMode] = useState<'basic' | 'advanced'>('basic');
+  const [videoRejectReason, setVideoRejectReason] = useState('');
 
   const doAction = async (fn: () => Promise<any>, after?: () => void) => {
     try { setError(''); setLoading(true); await fn(); after?.(); await onRefresh(); } catch (e: any) { setError(e?.message || String(e)); } finally { setLoading(false); }
@@ -289,12 +293,79 @@ export const RightInspectorPanel: React.FC<Props> = ({ node, instanceId, onRefre
             {node.shot_key && (() => {
               const currentVideoId = (currentVideoByShot || {})[node.shot_key];
               const currentVideo = currentVideoId ? ((videoAssetsByShot || {})[node.shot_key] || []).find((v: any) => v.id === currentVideoId) : null;
-              if (currentVideo) return (
-                <div data-testid="inspector-current-video" className="bg-[#0a0f1a] rounded-lg p-2.5 border border-white/5">
-                  <div className="text-gray-600 text-[10px] mb-1">当前视频 · {currentVideo.versionLabel}</div>
-                  <span className={`text-[8px] ${currentVideo.reviewStatus === 'approved' ? 'text-green-400' : currentVideo.reviewStatus === 'rejected' ? 'text-red-400' : 'text-amber-400'}`}>{currentVideo.reviewStatus === 'approved' ? '已通过' : currentVideo.reviewStatus === 'rejected' ? '驳回' : '待审'}</span>
-                </div>
-              );
+              if (currentVideo) {
+                const rs = currentVideo.reviewStatus;
+                return (
+                  <div data-testid="inspector-current-video" className="bg-[#0a0f1a] rounded-lg p-2.5 border border-white/5 space-y-2">
+                    {/* Title */}
+                    <div className="text-gray-600 text-[10px] mb-1">当前视频 · {currentVideo.versionLabel}</div>
+
+                    {/* Video player */}
+                    <video data-testid={`inspector-video-player-${node.shot_key}`} src={currentVideo.videoUrl} controls preload="metadata" className="w-full rounded border border-white/5" style={{ maxHeight: 160 }} />
+
+                    {/* Metadata grid */}
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[10px] bg-[#0a0f1a] rounded-lg p-2 border border-white/5">
+                      <div><div className="text-gray-600">版本</div><div className="text-gray-200">{currentVideo.versionLabel}</div></div>
+                      <div><div className="text-gray-600">生成时间</div><div className="text-gray-200">{currentVideo.createdAt ? new Date(currentVideo.createdAt).toLocaleString() : '-'}</div></div>
+                      <div><div className="text-gray-600">提供商</div><div className="text-gray-200">{currentVideo.provider || '-'}</div></div>
+                      <div><div className="text-gray-600">模型</div><div className="text-gray-200">{currentVideo.model || '-'}</div></div>
+                    </div>
+
+                    {/* Pending review — approve / reject */}
+                    {rs === 'pending' && (
+                      <div className="space-y-1.5">
+                        <button data-testid={`inspector-approve-video-${node.shot_key}`}
+                          onClick={() => onApproveVideo?.(node.shot_key, currentVideo.id)}
+                          className="flex items-center justify-center gap-1.5 bg-green-900/40 hover:bg-green-900/60 text-green-300 text-xs px-3 py-2 rounded-lg w-full transition-colors border border-green-700/20 font-medium">
+                          <Check className="w-3 h-3" /> 审核通过
+                        </button>
+                        <input data-testid={`inspector-reject-reason-${node.shot_key}`}
+                          placeholder="输入驳回原因..."
+                          value={videoRejectReason}
+                          onChange={e => setVideoRejectReason(e.target.value)}
+                          className="bg-[#0a0f1a] border border-white/10 rounded-lg px-3 py-2 text-gray-200 text-xs w-full placeholder:text-gray-600 focus:outline-none focus:border-red-500/50 transition-colors" />
+                        <button data-testid={`inspector-reject-video-${node.shot_key}`}
+                          onClick={() => {
+                            if (!videoRejectReason.trim()) { setError('请填写驳回原因'); return; }
+                            onRejectVideo?.(node.shot_key, currentVideo.id, videoRejectReason);
+                            setVideoRejectReason('');
+                          }}
+                          className="flex items-center justify-center gap-1.5 bg-red-900/40 hover:bg-red-900/60 text-red-300 text-xs px-3 py-2 rounded-lg w-full transition-colors border border-red-700/20 font-medium">
+                          <X className="w-3 h-3" /> 驳回
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Approved — show 已通过 */}
+                    {rs === 'approved' && (
+                      <div className="flex items-center gap-2 text-green-400 text-[10px]">
+                        <Check className="w-3 h-3" />
+                        <span>已通过</span>
+                        {currentVideo.reviewedAt && <span className="text-gray-500">{new Date(currentVideo.reviewedAt).toLocaleString()}</span>}
+                      </div>
+                    )}
+
+                    {/* Rejected — show reason + regenerate */}
+                    {rs === 'rejected' && (
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-2 text-red-400 text-[10px]">
+                          <X className="w-3 h-3" />
+                          <span>已驳回</span>
+                          {currentVideo.reviewedAt && <span className="text-gray-500">{new Date(currentVideo.reviewedAt).toLocaleString()}</span>}
+                        </div>
+                        {currentVideo.rejectReason && (
+                          <div className="text-red-300 text-[9px] bg-red-950/20 rounded px-2 py-1">{currentVideo.rejectReason}</div>
+                        )}
+                        <button data-testid={`inspector-regenerate-video-${node.shot_key}`}
+                          onClick={() => onRegenerateShot?.(node.node_id, node.shot_key)}
+                          className="flex items-center justify-center gap-1.5 bg-orange-900/40 hover:bg-orange-900/60 text-orange-300 text-xs px-3 py-2 rounded-lg w-full transition-colors border border-orange-700/20 font-medium">
+                          <RotateCcw className="w-3 h-3" /> 重新生成
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              }
               return null;
             })()}
             {node.video_url && !(currentVideoByShot || {})[node.shot_key] && (

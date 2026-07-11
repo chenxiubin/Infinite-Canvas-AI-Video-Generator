@@ -1,11 +1,10 @@
 import React from 'react';
-import { Zap, RotateCcw, Layers, Cpu, Trash2, Settings } from 'lucide-react';
+import { RotateCcw, Layers, Trash2, Settings } from 'lucide-react';
 
 interface Props {
   modelAdapter: string;
   adapters?: any[];
   onSetModelAdapter?: (k: string) => void;
-  onRunDemo: () => void;
   onReset: () => void;
   loading: string;
   onClearAllRefImages?: () => void;
@@ -15,7 +14,7 @@ interface Props {
 }
 
 export const WorkbenchHeader: React.FC<Props> = ({
-  modelAdapter, adapters, onSetModelAdapter, onRunDemo, onReset, loading, onClearAllRefImages,
+  modelAdapter, adapters, onSetModelAdapter, onReset, loading, onClearAllRefImages,
   modelSettingsLabel, onOpenModelSettings,
 }) => (
   <header data-testid="workbench-header"
@@ -49,11 +48,6 @@ export const WorkbenchHeader: React.FC<Props> = ({
           <span className="w-1.5 h-1.5 rounded-full bg-blue-400" /> {loading}
         </span>
       )}
-      <button data-testid="run-full-demo-button" onClick={onRunDemo}
-        className="flex items-center gap-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs px-3.5 py-1.5 rounded-lg font-medium
-          transition-all duration-150 shadow-sm shadow-purple-900/30 active:scale-95">
-        <Zap className="w-3.5 h-3.5" /> 运行完整演示
-      </button>
       {onClearAllRefImages && (
         <button data-testid="clear-all-fixed-ref-images" onClick={onClearAllRefImages}
           className="flex items-center gap-1 bg-white/5 hover:bg-white/10 text-amber-500 hover:text-amber-300 text-xs px-2.5 py-1.5 rounded-lg transition-colors"

@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { DemoStepLog } from './DemoStepLog';
 import { Package, FileVideo, Layers, Cpu, Play, Eye, CheckCheck, Download, X, AlertTriangle, Image, Upload } from 'lucide-react';
 import { allRequiredShotsApproved, getBlockedShots, getMergeDisabledReason } from '../lib/reviewGate';
+import { DirectorConsole } from './DirectorConsole';
 
 interface WorkbenchAsset { id: string; filename: string; url: string; role: string; createdAt: number; }
 
@@ -26,6 +27,9 @@ interface Props {
   videoAssetsByShot?: Record<string, any[]>;
   currentVideoByShot?: Record<string, string>;
   onSetCurrentVideo?: (shotKey: string, videoId: string) => void;
+  // 10L-2: Director Console composition order
+  compositionOrder?: string[];
+  onSetCompositionOrder?: (order: string[]) => void;
 }
 
 const SectionCard: React.FC<{ title: string; icon: React.ReactNode; children: React.ReactNode; testid?: string }> =
@@ -61,14 +65,15 @@ const ActionBtn: React.FC<{ testid?: string; onClick: () => void; disabled?: boo
     );
   };
 
-type SectionKey = 'productLine' | 'assets';
+type SectionKey = 'productLine' | 'assets' | 'directorDesk';
 
 const SECTION_META: Record<SectionKey, { label: string; icon: React.FC<{ className?: string }> }> = {
   productLine: { label: '产品线', icon: Layers },
   assets: { label: '素材', icon: Image },
+  directorDesk: { label: '导演台', icon: Eye },
 };
 
-const SECTION_ORDER: SectionKey[] = ['productLine', 'assets'];
+const SECTION_ORDER: SectionKey[] = ['productLine', 'directorDesk', 'assets'];
 
 export const WorkflowSidebar: React.FC<Props> = (p) => {
   // ── State ──
@@ -247,21 +252,44 @@ export const WorkflowSidebar: React.FC<Props> = (p) => {
                   const isCurrent = (p.currentVideoByShot || {})[shotKey] === v.id;
                   return (
                     <div key={v.id} data-testid={`video-version-card-${shotKey}-${v.versionLabel}`}
-                      className={`flex items-center gap-2 px-2 py-1.5 border-b border-white/5 last:border-0 ${isCurrent ? 'bg-purple-900/10' : ''}`}>
-                      <span className="text-[8px] text-gray-500 w-6 flex-shrink-0">{v.versionLabel}</span>
-                      <span className="text-[8px] text-gray-400 flex-1 truncate">{v.shotKey}</span>
-                      {isCurrent ? (
-                        <span data-testid={`video-current-badge-${shotKey}-${v.versionLabel}`} className="text-[7px] text-purple-300 bg-purple-900/30 px-1 rounded flex-shrink-0">当前使用中</span>
-                      ) : (
-                        p.onSetCurrentVideo && (
-                          <button data-testid={`video-set-current-${shotKey}-${v.versionLabel}`}
-                            onClick={() => { p.onSetCurrentVideo?.(shotKey, v.id); }}
-                            className="text-[7px] text-gray-500 hover:text-purple-300 bg-white/5 hover:bg-purple-900/20 rounded px-1 py-0.5 flex-shrink-0">
-                            设为当前
-                          </button>
-                        )
+                      className={`px-2 py-1.5 border-b border-white/5 last:border-0 ${isCurrent ? 'bg-purple-900/10' : ''}`}>
+                      {/* Top row: existing items */}
+                      <div className="flex items-center gap-2">
+                        <span className="text-[8px] text-gray-500 w-6 flex-shrink-0">{v.versionLabel}</span>
+                        <span className="text-[8px] text-gray-400 flex-1 truncate">{v.shotKey}</span>
+                        {isCurrent ? (
+                          <span data-testid={`video-current-badge-${shotKey}-${v.versionLabel}`} className="text-[7px] text-purple-300 bg-purple-900/30 px-1 rounded flex-shrink-0">当前使用中</span>
+                        ) : (
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            {p.onSetCurrentVideo && (
+                              <button data-testid={`video-set-current-${shotKey}-${v.versionLabel}`}
+                                onClick={() => { p.onSetCurrentVideo?.(shotKey, v.id); }}
+                                className="text-[7px] text-gray-500 hover:text-purple-300 bg-white/5 hover:bg-purple-900/20 rounded px-1 py-0.5">
+                                设为当前
+                              </button>
+                            )}
+                            {p.onSelectShot && (
+                              <button data-testid={`video-view-${shotKey}-${v.versionLabel}`}
+                                onClick={() => { p.onSelectShot?.(shotKey); }}
+                                className="text-[7px] text-gray-500 hover:text-purple-300 bg-white/5 hover:bg-purple-900/20 rounded px-1 py-0.5">
+                                查看
+                              </button>
+                            )}
+                          </div>
+                        )}
+                        <span className={`text-[7px] flex-shrink-0 ${v.reviewStatus === 'approved' ? 'text-green-400' : v.reviewStatus === 'rejected' ? 'text-red-400' : 'text-amber-400'}`}>{v.reviewStatus === 'approved' ? '已通过' : v.reviewStatus === 'rejected' ? '驳回' : '待审'}</span>
+                      </div>
+                      {/* Provider + model row */}
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span data-testid={`video-provider-${shotKey}-${v.versionLabel}`} className="text-[7px] text-gray-600">提供方: {v.provider || '-'}</span>
+                        <span data-testid={`video-model-${shotKey}-${v.versionLabel}`} className="text-[7px] text-gray-600">模型: {v.model || '-'}</span>
+                      </div>
+                      {/* Review reason (only when rejected) */}
+                      {v.reviewStatus === 'rejected' && (
+                        <div data-testid={`video-review-reason-${shotKey}-${v.versionLabel}`} className="text-[7px] text-red-400/80 mt-0.5">
+                          驳回原因: {v.reviewReason || '-'}
+                        </div>
                       )}
-                      <span className={`text-[7px] flex-shrink-0 ${v.reviewStatus === 'approved' ? 'text-green-400' : v.reviewStatus === 'rejected' ? 'text-red-400' : 'text-amber-400'}`}>{v.reviewStatus === 'approved' ? '已通过' : v.reviewStatus === 'rejected' ? '驳回' : '待审'}</span>
                     </div>
                   );
                 })}
@@ -365,9 +393,30 @@ export const WorkflowSidebar: React.FC<Props> = (p) => {
     </div>
   );
 
+  const renderDirectorDesk = () => {
+    const isDesk = (p.productLine || 'desk_calendar') === 'desk_calendar';
+    const shotNames = isDesk ? SHOT_NAMES_DESK : SHOT_NAMES_WALL;
+    const shotKeys = Object.keys(shotNames);
+    return (
+      <DirectorConsole
+        instance={p.instance}
+        productLine={p.productLine}
+        optionalShotEnabled={p.optionalShotEnabled}
+        currentVideoByShot={p.currentVideoByShot}
+        videoAssetsByShot={p.videoAssetsByShot}
+        shotNames={shotNames}
+        shotKeys={shotKeys}
+        compositionOrder={p.compositionOrder}
+        onSetCompositionOrder={p.onSetCompositionOrder}
+        instanceId={p.instance?.instance_id}
+      />
+    );
+  };
+
   const sectionRenderers: Record<SectionKey, () => React.ReactNode> = {
     productLine: renderProductLine,
     assets: renderAssets,
+    directorDesk: renderDirectorDesk,
     template: renderTemplate,
     batch: renderBatch,
     model: renderModel,

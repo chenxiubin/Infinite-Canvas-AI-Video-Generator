@@ -1,14 +1,15 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('MVP-4 10K-2 APIMart Generation Flow', () => {
-  test.beforeEach(async ({ page }) => {
+  async function ensureWorkbench(page: any) {
     await page.goto('/');
     const wbBtn = page.getByRole('button', { name: '生产工作台' });
     if (await wbBtn.isVisible({ timeout: 5000 }).catch(() => false)) await wbBtn.click();
     await expect(page.getByTestId('mvp3-workbench')).toBeVisible({ timeout: 10000 });
-  });
+  }
 
   async function openSettings(page: any) {
+    await ensureWorkbench(page);
     await page.getByTestId('model-settings-button').click();
     await expect(page.getByTestId('model-settings-panel')).toBeVisible({ timeout: 5000 });
   }
@@ -37,15 +38,65 @@ test.describe('MVP-4 10K-2 APIMart Generation Flow', () => {
 
   async function clickInspectorGenerate(page: any, shotKey: string) {
     await focusShotInInspector(page, shotKey);
-    await expect(page.getByTestId(`inspector-generate-shot-${shotKey}`)).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId(`inspector-generate-shot-${shotKey}`)).toBeVisible({ timeout: 15000 });
     await page.getByTestId(`inspector-generate-shot-${shotKey}`).click();
   }
 
-  async function demoThenGenerate(page: any) {
-    await page.getByTestId('run-full-demo-button').click();
-    await expect(page.getByTestId('production-status-compact')).toBeAttached({ timeout: 30000 });
-    await expect(page.getByTestId('merge-node-status')).toContainText('已通过', { timeout: 10000 });
+  // Setup batch via API then generate S01_main via Inspector (replaces run-full-demo-button)
+  async function demoThenGenerate(page: any, request: any) {
+    const sku = 'K2-' + Date.now();
+    const prod = await request.post('/api/v1/products', { data: { product_type: 'desk_calendar', sku, title: 'K2 ' + sku } });
+    const prodData = await prod.json();
+    const pid = prodData.product_id;
+    for (const r of ['main','detail1','detail2','scene','brand']) {
+      await request.post(`/api/v1/products/${pid}/assets`, { data: { original_filename: `${sku}_${r}.jpg`, file_url: `/mock/${sku}_${r}.jpg` } });
+    }
+    const pd = await request.get(`/api/v1/products/${pid}`);
+    const pdData = await pd.json();
+    for (const a of (pdData.assets || [])) {
+      if (a.role_key && a.role_key !== 'unrecognized') {
+        await request.put(`/api/v1/products/${pid}/assets/${a.asset_id}/role`, { data: { role_key: a.role_key } });
+      }
+    }
+    const tmpl = await request.get('/api/v1/video-templates?product_type=desk_calendar');
+    const tmplData = await tmpl.json();
+    const tid = tmplData.templates[0].template_id;
+    const batchResp = await request.post('/api/v1/video-batches', { data: { template_id: tid, product_ids: [pid] } });
+    const iid = (await batchResp.json()).instances[0].instance_id;
+    // Navigate via blank to ensure React remount (hash change on same path doesn't remount)
+    await page.goto('about:blank');
+    await page.goto(`/#instance=${iid}`);
+    await expect(page.getByTestId('mvp3-workbench')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('shot-control-node-S01_main')).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId('canvas-detail-shot-key')).toContainText('S01_main', { timeout: 8000 });
     await clickInspectorGenerate(page, 'S01_main');
+  }
+
+  // Setup batch via API only (no generation) — for tests that need canvas nodes
+  async function setupBatchOnly(page: any, request: any) {
+    const sku = 'BT-' + Date.now();
+    const prod = await request.post('/api/v1/products', { data: { product_type: 'desk_calendar', sku, title: 'BT ' + sku } });
+    const prodData = await prod.json();
+    const pid = prodData.product_id;
+    for (const r of ['main','detail1','detail2','scene','brand']) {
+      await request.post(`/api/v1/products/${pid}/assets`, { data: { original_filename: `${sku}_${r}.jpg`, file_url: `/mock/${sku}_${r}.jpg` } });
+    }
+    const pd = await request.get(`/api/v1/products/${pid}`);
+    const pdData = await pd.json();
+    for (const a of (pdData.assets || [])) {
+      if (a.role_key && a.role_key !== 'unrecognized') {
+        await request.put(`/api/v1/products/${pid}/assets/${a.asset_id}/role`, { data: { role_key: a.role_key } });
+      }
+    }
+    const tmpl = await request.get('/api/v1/video-templates?product_type=desk_calendar');
+    const tmplData = await tmpl.json();
+    const tid = tmplData.templates[0].template_id;
+    const batchResp = await request.post('/api/v1/video-batches', { data: { template_id: tid, product_ids: [pid] } });
+    const iid = (await batchResp.json()).instances[0].instance_id;
+    await page.goto('about:blank');
+    await page.goto(`/#instance=${iid}`);
+    await expect(page.getByTestId('mvp3-workbench')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('shot-control-node-S01_main')).toBeVisible({ timeout: 15000 });
   }
 
   const FULL_MOCK = async (route: any) => {
@@ -58,15 +109,15 @@ test.describe('MVP-4 10K-2 APIMart Generation Flow', () => {
   };
 
   // ── K2-01 ──
-  test('K2-01: blocked without key', async ({ page }) => {
+  test('K2-01: blocked without key', async ({ page, request }) => {
     test.setTimeout(60000);
     await openSettings(page); await page.getByTestId('model-provider-apimart').click(); await closeSettings(page);
-    await demoThenGenerate(page);
+    await demoThenGenerate(page, request);
     await expect(page.getByTestId('mvp3-workbench')).toContainText('API Key', { timeout: 8000 });
   });
 
   // ── K2-02 ──
-  test('K2-02: full generation calls APIMart APIs', async ({ page }) => {
+  test('K2-02: full generation calls APIMart APIs', async ({ page, request }) => {
     test.setTimeout(60000);
     const calls: string[] = [];
     await page.route('**/api.apimart.ai/**', async (route) => {
@@ -74,7 +125,7 @@ test.describe('MVP-4 10K-2 APIMart Generation Flow', () => {
       await FULL_MOCK(route);
     });
     await setupApimart(page);
-    await demoThenGenerate(page);
+    await demoThenGenerate(page, request);
     // At minimum, generation submit must be called
     await expect.poll(() => calls.length, { timeout: 15000 }).toBeGreaterThanOrEqual(2);
     expect(calls.some(c => c.includes('/generations'))).toBe(true);
@@ -83,7 +134,7 @@ test.describe('MVP-4 10K-2 APIMart Generation Flow', () => {
   });
 
   // ── K2-03 ──
-  test('K2-03: processing → completed poll', async ({ page }) => {
+  test('K2-03: processing → completed poll', async ({ page, request }) => {
     test.setTimeout(60000);
     let pollCalls = 0;
     await page.route('**/api.apimart.ai/**', async (route) => {
@@ -98,12 +149,12 @@ test.describe('MVP-4 10K-2 APIMart Generation Flow', () => {
       await route.fulfill({ status: 200, contentType: 'application/json', body });
     });
     await setupApimart(page);
-    await demoThenGenerate(page);
+    await demoThenGenerate(page, request);
     await expect.poll(() => pollCalls, { timeout: 15000 }).toBeGreaterThanOrEqual(2);
   });
 
   // ── K2-04 ──
-  test('K2-04: task failed does not add video version', async ({ page }) => {
+  test('K2-04: task failed does not add video version', async ({ page, request }) => {
     test.setTimeout(60000);
     await page.route('**/api.apimart.ai/**', async (route) => {
       const url = route.request().url();
@@ -114,7 +165,7 @@ test.describe('MVP-4 10K-2 APIMart Generation Flow', () => {
       await route.fulfill({ status: 200, contentType: 'application/json', body });
     });
     await setupApimart(page);
-    await demoThenGenerate(page);
+    await demoThenGenerate(page, request);
     // v2 should NOT exist
     await page.getByTestId('sidebar-icon-assets').hover();
     await page.getByTestId('asset-tab-video').click();
@@ -122,7 +173,7 @@ test.describe('MVP-4 10K-2 APIMart Generation Flow', () => {
   });
 
   // ── K2-05 ──
-  test('K2-05: two refs use first_frame/last_frame', async ({ page }) => {
+  test('K2-05: two refs use first_frame/last_frame', async ({ page, request }) => {
     test.setTimeout(60000);
     let genBody: any = null;
     await page.route('**/api.apimart.ai/**', async (route) => {
@@ -138,9 +189,8 @@ test.describe('MVP-4 10K-2 APIMart Generation Flow', () => {
       }
     });
     await setupApimart(page);
-    // Use S04_motion which has 2 reference image nodes
-    await page.getByTestId('run-full-demo-button').click();
-    await expect(page.getByTestId('production-status-compact')).toBeAttached({ timeout: 30000 });
+    // Setup batch via API so canvas nodes exist
+    await setupBatchOnly(page, request);
     // Drop images on S04 ref nodes 0 and 1
     const MINI_PNG = [137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,2,0,0,0,144,119,83,222,0,0,0,12,73,68,65,84,8,215,99,248,207,192,0,0,3,0,1,171,21,105,195,0,0,0,0,73,69,78,68,174,66,96,130];
     for (const ri of [0, 1]) {
@@ -163,7 +213,7 @@ test.describe('MVP-4 10K-2 APIMart Generation Flow', () => {
   });
 
   // ── K2-06 ──
-  test('K2-06: maxRefs=1 truncates to single image', async ({ page }) => {
+  test('K2-06: maxRefs=1 truncates to single image', async ({ page, request }) => {
     test.setTimeout(60000);
     let genBody: any = null;
     await page.route('**/api.apimart.ai/**', async (route) => {
@@ -183,42 +233,39 @@ test.describe('MVP-4 10K-2 APIMart Generation Flow', () => {
     await page.getByTestId('model-provider-apimart').click();
     await page.getByTestId('apimart-select-model-sora-2').click();
     await closeSettings(page);
-    await demoThenGenerate(page);
+    await demoThenGenerate(page, request);
     await expect.poll(() => genBody, { timeout: 15000 }).not.toBeNull();
     // Should only have 1 image_url (not image_with_roles)
     expect(genBody.image_urls?.length || 0).toBeLessThanOrEqual(1);
   });
 
   // ── K2-07 ──
-  test('K2-07: mock mode generation not affected', async ({ page }) => {
+  test('K2-07: mock mode generation not affected', async ({ page, request }) => {
     test.setTimeout(60000);
-    await page.getByTestId('run-full-demo-button').click();
-    await expect(page.getByTestId('production-status-compact')).toBeAttached({ timeout: 30000 });
-    await expect(page.getByTestId('merge-node-status')).toContainText('已通过', { timeout: 10000 });
-    await clickInspectorGenerate(page, 'S01_main');
+    await demoThenGenerate(page, request);
     await page.getByTestId('sidebar-icon-assets').hover();
     await page.getByTestId('asset-tab-video').click();
-    await expect(page.getByTestId('video-version-card-S01_main-v2')).toBeAttached({ timeout: 10000 });
+    await expect(page.getByTestId('video-version-card-S01_main-v1')).toBeAttached({ timeout: 10000 });
   });
 
   // ── K2-08 ──
-  test('K2-08: no API key leak', async ({ page }) => {
+  test('K2-08: no API key leak', async ({ page, request }) => {
     test.setTimeout(60000);
     await page.route('**/api.apimart.ai/**', FULL_MOCK);
     await setupApimart(page);
-    await demoThenGenerate(page);
+    await demoThenGenerate(page, request);
     const bodyText = await page.locator('body').textContent();
     expect(bodyText).not.toContain('sk-test-key-123456');
   });
 
   // ── K2-09 ──
-  test('K2-09: upload failure does not add video version', async ({ page }) => {
+  test('K2-09: upload failure does not add video version', async ({ page, request }) => {
     test.setTimeout(60000);
     await page.route('**/api.apimart.ai/v1/uploads/**', async (route) => {
       await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Upload failed' }) });
     });
     await setupApimart(page);
-    await demoThenGenerate(page);
+    await demoThenGenerate(page, request);
     // v2 should NOT appear after upload failure
     await page.getByTestId('sidebar-icon-assets').hover();
     await page.getByTestId('asset-tab-video').click();
@@ -226,7 +273,7 @@ test.describe('MVP-4 10K-2 APIMart Generation Flow', () => {
   });
 
   // ── K2-10 ──
-  test('K2-10: submit failure does not add video version', async ({ page }) => {
+  test('K2-10: submit failure does not add video version', async ({ page, request }) => {
     test.setTimeout(60000);
     await page.route('**/api.apimart.ai/v1/uploads/**', async (route) => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ url: 'https://mock.apimart.ai/img.png' }) });
@@ -235,15 +282,15 @@ test.describe('MVP-4 10K-2 APIMart Generation Flow', () => {
       await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'Invalid request' }) });
     });
     await setupApimart(page);
-    await demoThenGenerate(page);
-    // v2 should NOT exist (generation failed)
+    await demoThenGenerate(page, request);
+    // No video version should exist (generation failed completely)
     await page.getByTestId('sidebar-icon-assets').hover();
     await page.getByTestId('asset-tab-video').click();
-    await expect(page.getByTestId('video-version-card-S01_main-v2')).toBeHidden({ timeout: 5000 });
+    await expect(page.getByTestId('video-version-card-S01_main-v1')).toBeHidden({ timeout: 5000 });
   });
 
   // ── K2-11 ──
-  test('K2-11: remoteUrl cache reuses uploaded image', async ({ page }) => {
+  test('K2-11: remoteUrl cache reuses uploaded image', async ({ page, request }) => {
     test.setTimeout(60000);
     let uploadCount = 0;
     await page.route('**/api.apimart.ai/v1/uploads/**', async (route) => {
@@ -257,9 +304,8 @@ test.describe('MVP-4 10K-2 APIMart Generation Flow', () => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'completed', progress: 100, result: { video_url: 'https://mock.apimart.ai/video.mp4' } }) });
     });
     await setupApimart(page);
-    // Add a reference image to S01 first
-    await page.getByTestId('run-full-demo-button').click();
-    await expect(page.getByTestId('production-status-compact')).toBeAttached({ timeout: 30000 });
+    // Setup batch via API so canvas nodes exist
+    await setupBatchOnly(page, request);
     const MINI_PNG = [137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,2,0,0,0,144,119,83,222,0,0,0,12,73,68,65,84,8,215,99,248,207,192,0,0,3,0,1,171,21,105,195,0,0,0,0,73,69,78,68,174,66,96,130];
     const refNode = page.getByTestId('reference-image-node-S01_main-0');
     await refNode.scrollIntoViewIfNeeded();

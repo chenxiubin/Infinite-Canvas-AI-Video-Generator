@@ -166,25 +166,32 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
           const sk = n.data.shot_key;
           const currentVideoId = (currentVideoByShot || {})[sk];
           const currentVideo = currentVideoId ? ((videoAssetsByShot || {})[sk] || []).find((v: any) => v.id === currentVideoId) : null;
-          n.data = { ...n.data, currentVideo: currentVideo || null };
+          n.data = { ...n.data, currentVideo: currentVideo || null, generating: (generatingShotKeys || []).includes(sk), generationProgress: undefined };
         }
         if (n.type === 'mergeNode') {
           const isWall = (productLine || 'desk_calendar') === 'wall_calendar';
           const shotKeys = [...(isWall ? ([] as string[]) : ([] as string[]))];
           // Use the actual shot keys from fixedLayout nodes
           const layoutShotKeys = raw.nodes.filter((rn: any) => rn.type === 'shotControlNode').map((rn: any) => rn.data?.shot_key).filter(Boolean);
-          const allApproved = layoutShotKeys.every((sk: string) => {
+          // Compute blocked shots: shots where currentVideo is not approved or doesn't exist
+          const blockedShots: { shotKey: string; reason: string }[] = [];
+          let approvedCount = 0;
+          layoutShotKeys.forEach((sk: string) => {
             const cid = (currentVideoByShot || {})[sk];
             const cv = cid ? ((videoAssetsByShot || {})[sk] || []).find((v: any) => v.id === cid) : null;
-            return cv?.reviewStatus === 'approved';
+            if (cv?.reviewStatus === 'approved') {
+              approvedCount++;
+            } else {
+              let reason = '未通过';
+              if (!cv) reason = '未生成';
+              else if (cv.reviewStatus === 'pending') reason = '待审核';
+              else if (cv.reviewStatus === 'rejected') reason = '已驳回';
+              blockedShots.push({ shotKey: sk, reason });
+            }
           });
+          const allApproved = approvedCount === layoutShotKeys.length;
           const totalCount = layoutShotKeys.length;
-          const approvedCount = layoutShotKeys.filter((sk: string) => {
-            const cid = (currentVideoByShot || {})[sk];
-            const cv = cid ? ((videoAssetsByShot || {})[sk] || []).find((v: any) => v.id === cid) : null;
-            return cv?.reviewStatus === 'approved';
-          }).length;
-          n.data = { ...n.data, canMerge: allApproved, mergeStatus: approvedCount > 0 ? `${approvedCount}/${totalCount} 已通过` : '等待全部分镜审核通过' };
+          n.data = { ...n.data, canMerge: allApproved, mergeStatus: approvedCount > 0 ? `${approvedCount}/${totalCount} 已通过` : '等待全部分镜审核通过', blockedShots };
         }
         return n;
       }),

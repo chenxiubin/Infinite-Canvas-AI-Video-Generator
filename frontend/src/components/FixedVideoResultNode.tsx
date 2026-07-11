@@ -3,7 +3,7 @@ import { Handle, Position } from '@xyflow/react';
 
 interface Props {
   id: string;
-  data: { shot_key: string; shot_name: string; product_line: string; currentVideo?: any };
+  data: { shot_key: string; shot_name: string; product_line: string; currentVideo?: any; generating?: boolean; generationProgress?: number };
 }
 
 export const FixedVideoResultNode: React.FC<Props> = ({ data }) => {
@@ -42,12 +42,16 @@ export const FixedVideoResultNode: React.FC<Props> = ({ data }) => {
         )}
       </div>
       <div data-testid={`fixed-video-node-status-${sk}`} className="text-[8px] mt-1 text-center">
-        {cv ? (
-          <span className={cv.reviewStatus === 'approved' ? 'text-green-400' : cv.reviewStatus === 'rejected' ? 'text-red-400' : 'text-amber-400'}>
-            {cv.reviewStatus === 'approved' ? '已通过，可合成' : cv.reviewStatus === 'rejected' ? '已驳回' : '待审核'}
+        {data.generating ? (
+          <span data-testid={`fixed-video-node-review-status-${sk}`} className="text-blue-400">
+            {data.generationProgress != null ? `生成中 ${data.generationProgress}%` : '生成中'}
+          </span>
+        ) : cv ? (
+          <span data-testid={`fixed-video-node-review-status-${sk}`} className={cv.reviewStatus === 'approved' ? 'text-green-400' : cv.reviewStatus === 'rejected' ? 'text-red-400' : 'text-amber-400'}>
+            {cv.reviewStatus === 'approved' ? '已通过，可合成' : cv.reviewStatus === 'rejected' ? '已驳回' : '待审核'} · {cv.versionLabel}
           </span>
         ) : (
-          <span className="text-gray-600">未生成</span>
+          <span data-testid={`fixed-video-node-review-status-${sk}`} className="text-gray-600">未生成</span>
         )}
       </div>
     </div>
