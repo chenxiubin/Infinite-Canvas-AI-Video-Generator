@@ -65,15 +65,18 @@ const ActionBtn: React.FC<{ testid?: string; onClick: () => void; disabled?: boo
     );
   };
 
-type SectionKey = 'productLine' | 'assets' | 'directorDesk';
+type SectionKey = 'productLine' | 'template' | 'batch' | 'shots' | 'assets' | 'directorDesk';
 
 const SECTION_META: Record<SectionKey, { label: string; icon: React.FC<{ className?: string }> }> = {
   productLine: { label: '产品线', icon: Layers },
+  template: { label: '模板', icon: FileVideo },
+  batch: { label: '批次', icon: Package },
+  shots: { label: '分镜', icon: Layers },
   assets: { label: '素材', icon: Image },
   directorDesk: { label: '导演台', icon: Eye },
 };
 
-const SECTION_ORDER: SectionKey[] = ['productLine', 'directorDesk', 'assets'];
+const SECTION_ORDER: SectionKey[] = ['productLine', 'template', 'batch', 'shots', 'directorDesk', 'assets'];
 
 export const WorkflowSidebar: React.FC<Props> = (p) => {
   // ── State ──
