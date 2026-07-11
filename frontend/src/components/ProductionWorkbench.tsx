@@ -197,6 +197,67 @@ export const ProductionWorkbench: React.FC = () => {
       .then(() => setLoading(''))
       .catch((e) => { setError('无法加载指定实例: ' + (e?.message || '未知错误')); setLoading(''); });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Log node state changes for debugging nodeId binding
+  useEffect(() => {
+    console.log('INSTANCE_NODES', { instanceId: instance?.instance_id, nodesCount: nodes.length, nodes: nodes.map(n => ({ node_id: n.node_id, shot_key: n.shot_key, status: n.status })) });
+  }, [instance, nodes]);
+
+  // Auto-bootstrap: if no deep-link and no instance loaded, try to load or create a batch
+  // Ensures canvas shot nodes always have a backend node_id
+  const bootstrapRef = useRef(false);
+  useEffect(() => {
+    if (bootstrapRef.current) return;
+    const hash = window.location.hash;
+    if (hash.startsWith('#instance=')) return; // deep-link handles loading
+    // Let templates load first
+    const timer = setTimeout(async () => {
+      if (instance || bootstrapRef.current) return;
+      bootstrapRef.current = true;
+      try {
+        // Try to find an existing product
+        const products = (await api.listProducts()) as any;
+        let pid = '';
+        if (products?.products?.length > 0) {
+          pid = products.products[0].id;
+        } else {
+          // Create a demo product
+          const s = `SKU-AUTO-${Date.now()}`;
+          const d = await api.createProduct({ product_type: 'desk_calendar', sku: s, title: `Auto ${s}` });
+          pid = d.product_id;
+          // Register mock assets so checklist passes
+          for (const r of ['main', 'detail1', 'detail2', 'scene', 'brand']) {
+            await api.registerAsset(pid, { original_filename: `${s}_${r}.jpg`, file_url: `/mock/${s}_${r}.jpg` });
+          }
+          const dd = await api.getProduct(pid);
+          for (const a of (dd.assets || [])) {
+            if (a.role_key !== 'unrecognized') await api.updateAssetRole(pid, a.asset_id, a.role_key);
+          }
+        }
+        setProductId(pid);
+        // Get or create a template for desk_calendar
+        let tid = templates.find(t => t.product_type === 'desk_calendar')?.template_id;
+        if (!tid) {
+          const tpl = await api.listVideoTemplates('desk_calendar');
+          if (tpl.templates?.length) tid = tpl.templates[0].template_id;
+        }
+        if (!tid) return;
+        setSelTemplateId(tid);
+        // Create batch → creates instances + nodes → populate nodes state
+        const bd = await api.createVideoBatch(tid, [pid]);
+        setBatchId(bd.batch_id);
+        batchIdRef.current = bd.batch_id;
+        if (bd.instances?.length) {
+          await loadInstance(bd.instances[0].instance_id);
+          console.log('AUTO_BOOTSTRAP: loaded instance with nodes', bd.instances[0].instance_id);
+        }
+      } catch (e: any) {
+        console.warn('AUTO_BOOTSTRAP failed (use manual flow):', e?.message || e);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (selectedNodeId) return;
     setSelectedNodeId(productLine === 'wall_calendar' ? 'W01_main' : 'S01_main');
@@ -452,12 +513,15 @@ export const ProductionWorkbench: React.FC = () => {
   // 10L-1: Approve a specific video version in the library
   // 11E-1: Persist video asset to backend table (fire-and-forget)
   const persistVideoToBackend = (iid: string, sk: string, videoUrl: string, provider: string) => {
-    if (!iid) return;
+    if (!iid) { console.warn('persistVideoToBackend: instanceId is empty'); return; }
     fetch(`/api/v1/video-assets/${iid}/${sk}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ video_url: videoUrl, provider, model: userModelSettings.selectedVideoModelId }),
-    }).catch(() => {});
+    }).catch((e) => {
+      console.error('persistVideoToBackend failed:', e);
+      setError('视频保存到后端失败: ' + (e?.message || '未知错误'));
+    });
   };
 
   // 11E-1: Sync review status to backend (find latest version for this shot)

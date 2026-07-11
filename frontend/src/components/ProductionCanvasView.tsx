@@ -133,6 +133,7 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
           const binding = (shotBindings || []).find(b => b.shotKey === sk);
           const hasStartFrame = !!binding?.startFrameAssetId;
           const nodeId = nodeItem?.node_id || '';
+          console.log('SHOT_NODE_DEBUG', { shotKey: sk, nodeId, hasNodeItem: !!nodeItem, nodesCount: nodes.length, allShotKeys: nodes.map(nn => nn.shot_key) });
           const disabledReason = !nodeId ? '请先生成批次' : !hasStartFrame ? '缺少首帧' : '';
           n.data = {
             ...n.data,
