@@ -57,6 +57,43 @@ export function sanitizeError(e: any): string {
   return e?.message || String(e || '').slice(0, 200);
 }
 
+// ── Structured Task Error ──
+
+export class ApimartTaskError extends Error {
+  code: string;
+  taskId: string;
+  constructor(taskId: string, code: string, message: string) {
+    super(message);
+    this.name = 'ApimartTaskError';
+    this.code = code;
+    this.taskId = taskId;
+  }
+}
+
+const ERROR_CODE_CN: Record<string, string> = {
+  PUBLIC_ERROR_AUDIO_FILTERED: '生成音频被平台安全过滤。请关闭音频、更换模型或调整提示词后重试。',
+  PUBLIC_ERROR_CONTENT_FILTERED: '生成内容被平台安全过滤。请调整提示词后重试。',
+  PUBLIC_ERROR_IMAGE_FILTERED: '参考图被平台安全过滤。请更换参考图后重试。',
+  PUBLIC_ERROR_TIMEOUT: '视频生成超时。请稍后重试。',
+  PUBLIC_ERROR_QUOTA_EXCEEDED: 'API 配额已用尽。请检查账户余额。',
+  PUBLIC_ERROR_INVALID_PARAM: '生成参数无效。请检查模型设置。',
+};
+
+function extractErrorInfo(raw: any): { code: string; message: string } {
+  const error = raw?.error || raw?.data?.error || raw;
+  if (!error || typeof error !== 'object') {
+    return { code: 'UNKNOWN_ERROR', message: String(error || '未知错误') };
+  }
+  const code = error.code || error.error_code || error.errorCode || 'UNKNOWN_ERROR';
+  const msg = error.message || error.msg || error.error || String(error);
+  const cn = ERROR_CODE_CN[code];
+  return { code, message: cn || msg };
+}
+
+function cnErrorForCode(code: string): string {
+  return ERROR_CODE_CN[code] || `视频生成失败 (${code})`;
+}
+
 // ── Image Upload ──
 
 export async function uploadImageToApimart(
@@ -130,11 +167,13 @@ export async function getApimartTaskStatus(
     throw new Error(`任务状态查询失败: ${res.status}`);
   }
   const json = await res.json();
+  const data = json.data && typeof json.data === 'object' && !Array.isArray(json.data) ? json.data : json;
   return {
-    status: json.status || json.data?.status || 'unknown',
-    progress: json.progress ?? json.data?.progress ?? 0,
-    result: json.result || json.data?.result,
-    error: json.error || json.data?.error,
+    status: json.status || data.status || 'unknown',
+    progress: json.progress ?? data.progress ?? 0,
+    result: json.result || data.result,
+    error: json.error || data.error || json.error_code || data.error_code,
+    errorCode: json.error_code || data.error_code || json.error?.code || data.error?.code || null,
   };
 }
 
@@ -184,7 +223,11 @@ export async function pollApimartTask(
       rawStatus: raw.status,
     };
     onUpdate(task);
-    if (status === 'success' || status === 'failed') return task;
+    if (status === 'success') return task;
+    if (status === 'failed') {
+      const { code, message } = extractErrorInfo(raw);
+      throw new ApimartTaskError(taskId, code, message);
+    }
     await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
   }
   return {

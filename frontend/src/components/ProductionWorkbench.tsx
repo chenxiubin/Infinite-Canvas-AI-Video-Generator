@@ -13,7 +13,7 @@ import { ModelSettingsPanel } from './ModelSettingsPanel';
 import { type UserModelSettings } from '../types/modelSettings';
 import { loadUserModelSettings, saveUserModelSettings } from '../lib/userModelSettingsStore';
 import { getBuiltinVideoModels, findModelById } from '../lib/apimartClient';
-import { uploadImageToApimart, submitApimartVideoGeneration, pollApimartTask, buildApimartVideoRequest, sanitizeError, type VideoGenerationTaskState, type ApimartUploadedImage } from '../lib/apimartGenerationClient';
+import { uploadImageToApimart, submitApimartVideoGeneration, pollApimartTask, buildApimartVideoRequest, sanitizeError, ApimartTaskError, type VideoGenerationTaskState, type ApimartUploadedImage } from '../lib/apimartGenerationClient';
 // import removed: compositionOrder now uses store via prop chain (11A-Fix cleanup)
 
 type NodeStatus = 'pending' | 'running' | 'success' | 'failed';
@@ -547,10 +547,13 @@ export const ProductionWorkbench: React.FC = () => {
           persistVideoToBackend(instanceId, shotKey, finalTask.videoUrl, 'apimart');
           setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, taskId: genTaskId, status: 'success', progress: 100, warningMessages: warnings, updatedAt: Date.now() } }));
         } else {
-          setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, taskId: genTaskId, status: 'failed', progress: 0, errorMessage: finalTask.errorMessage || '生成失败', warningMessages: warnings, updatedAt: Date.now() } }));
+          const errMsg = finalTask.errorMessage || '生成失败：未返回视频';
+          setError(errMsg);
+          setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, taskId: genTaskId, status: 'failed', progress: 0, errorMessage: errMsg, warningMessages: warnings, updatedAt: Date.now() } }));
         }
       } catch (e: any) {
-        const errMsg = sanitizeError(e?.message || '');
+        const isTaskErr = e instanceof ApimartTaskError;
+        const errMsg = isTaskErr ? e.message : sanitizeError(e?.message || '');
         setError(errMsg);
         setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, status: 'failed', errorMessage: errMsg, updatedAt: Date.now() } }));
       } finally {
