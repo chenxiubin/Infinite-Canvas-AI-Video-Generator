@@ -464,7 +464,29 @@ export const ProductionWorkbench: React.FC = () => {
 
     const apiKey = userModelSettings.apimartApiKey;
     const baseUrl = userModelSettings.apimartBaseUrl;
-    const modelInfo = findModelById(builtinVideoModels, userModelSettings.selectedVideoModelId);
+    const modelInfo = findModelById(builtinVideoModels, userModelSettings.selectedVideoModelId)
+      // Fallback: allow custom model IDs not in builtin list
+      || (userModelSettings.selectedVideoModelId
+        ? { id: userModelSettings.selectedVideoModelId, name: userModelSettings.selectedVideoModelId, maxReferenceImages: 2, supportsLastFrame: true, supportsAudio: false } as any
+        : undefined);
+
+    // Guard: model must be non-empty for APIMart generation
+    if (!modelInfo) {
+      const msg = '请先在模型设置中选择 APIMart 模型。';
+      setError(msg);
+      setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, status: 'failed', errorMessage: msg, updatedAt: Date.now() } }));
+      return;
+    }
+
+    console.log('APIMART_GENERATE_PAYLOAD', {
+      provider: 'apimart',
+      model: modelInfo.id,
+      duration: userModelSettings.defaultVideoDuration,
+      aspectRatio: userModelSettings.defaultAspectRatio,
+      resolution: userModelSettings.defaultVideoResolution,
+      audio: userModelSettings.defaultVideoAudio,
+      referenceCount: reference_images.length,
+    });
 
     const runApimartGeneration = async () => {
       try {

@@ -111,7 +111,7 @@ export async function submitApimartVideoGeneration(
     throw new Error(`视频生成任务提交失败: ${res.status}${text ? ' ' + text.slice(0, 200) : ''}`);
   }
   const json = await res.json();
-  return json.task_id || json.data?.task_id || json.id || '';
+  return json.task_id || (Array.isArray(json.data) ? json.data[0]?.task_id : json.data?.task_id) || json.id || '';
 }
 
 // ── Task Status Poll ──
@@ -153,7 +153,9 @@ export function normalizeApimartTaskStatus(rawStatus: string): UnifiedGeneration
 
 export function normalizeApimartVideoUrl(result: any): string {
   if (!result) return '';
-  return result.video_url || result.video?.url || result.video || result.url || result.videos?.[0]?.url || '';
+  const url = result.video_url || result.video?.url || result.video || result.url || result.videos?.[0]?.url || '';
+  // Handle array-wrapped URLs (APIMart returns videos[0].url as string[])
+  return Array.isArray(url) ? (url[0] || '') : url;
 }
 
 // ── Poll Loop ──
