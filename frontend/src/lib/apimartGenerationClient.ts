@@ -1,4 +1,5 @@
 import type { ApimartModelInfo } from '../types/modelSettings';
+import { detectFamily, buildModelSpecificRequest, validateApimartVideoRequest } from './modelAdapter';
 
 function joinApimartUrl(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
@@ -284,9 +285,23 @@ export function buildApimartVideoRequest(
   audio: boolean,
   uploadedImages: ApimartUploadedImage[],
 ): { request: ApimartVideoGenerationRequest; warnings: string[] } {
+  const modelId = modelInfo?.id || '';
+
+  // Use model-specific adapter for known families (doubao-2.0 needs generate_audio + size)
+  const family = detectFamily(modelId);
+  if (family === 'doubao-2.0') {
+    const refPayload = buildApimartReferencePayload(modelInfo, uploadedImages);
+    const result = buildModelSpecificRequest(
+      modelId, prompt, duration, aspectRatio, resolution, audio,
+      refPayload.image_urls || [], refPayload.image_with_roles,
+    );
+    return { request: result.body as any, warnings: [...refPayload.warnings, ...result.warnings] };
+  }
+
+  // Standard format for all other models (doubao-1.5, veo3, etc.)
   const { image_urls, image_with_roles, warnings } = buildApimartReferencePayload(modelInfo, uploadedImages);
   const request: ApimartVideoGenerationRequest = {
-    model: modelInfo?.id || '',
+    model: modelId,
     prompt,
     duration,
     aspect_ratio: aspectRatio,

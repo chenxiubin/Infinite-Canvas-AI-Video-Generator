@@ -3,6 +3,7 @@ import { X, Eye, EyeOff, Check, AlertCircle, Wifi, WifiOff, Zap } from 'lucide-r
 import type { UserModelSettings, ApimartModelInfo, ModelProvider } from '../types/modelSettings';
 import { DEFAULT_USER_MODEL_SETTINGS } from '../types/modelSettings';
 import { loadUserModelSettings, saveUserModelSettings, maskApiKey, validateApiKeyFormat } from '../lib/userModelSettingsStore';
+import { detectFamily, getFamilyCapability, getSupportedDurations, getSupportedAspectRatios, getSupportedResolutions, isVeo3Lite } from '../lib/modelAdapter';
 import { testApimartConnection, fetchApimartModels, getBuiltinVideoModels, mergeBuiltinAndRemoteModels, findModelById } from '../lib/apimartClient';
 
 interface Props {
@@ -243,7 +244,7 @@ export const ModelSettingsPanel: React.FC<Props> = ({ isOpen, onClose, onSetting
                   <select data-testid="apimart-default-duration" value={settings.defaultVideoDuration}
                     onChange={e => handleParamChange('defaultVideoDuration', Number(e.target.value))}
                     className="w-full text-[10px] bg-[#111827] border border-white/10 rounded px-2 py-1 text-gray-200 mt-1">
-                    {(currentModel.durations || [5]).map(d => <option key={d} value={d}>{d}秒</option>)}
+                    {(currentModel.durations?.length ? currentModel.durations : getSupportedDurations(settings.selectedVideoModelId)).map(d => <option key={d} value={d}>{d}秒</option>)}
                   </select>
                 </div>
                 <div>
@@ -251,7 +252,7 @@ export const ModelSettingsPanel: React.FC<Props> = ({ isOpen, onClose, onSetting
                   <select data-testid="apimart-default-resolution" value={settings.defaultVideoResolution}
                     onChange={e => handleParamChange('defaultVideoResolution', e.target.value)}
                     className="w-full text-[10px] bg-[#111827] border border-white/10 rounded px-2 py-1 text-gray-200 mt-1">
-                    {(currentModel.resolutions || ['720p']).map(r => <option key={r} value={r}>{r}</option>)}
+                    {(currentModel.resolutions?.length ? currentModel.resolutions : getSupportedResolutions(settings.selectedVideoModelId)).map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
                 </div>
                 <div>
