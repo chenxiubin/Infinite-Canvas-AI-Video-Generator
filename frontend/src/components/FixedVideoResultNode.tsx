@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { Handle, Position } from '@xyflow/react';
 
 interface Props {
@@ -14,14 +14,22 @@ export const FixedVideoResultNode: React.FC<Props> = ({ data }) => {
   const showVideo = hasVideo(cv);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
+  const initRef = useRef(false);
 
   const handleLoaded = useCallback(() => {
+    // Only initialize first frame once per video instance
+    if (initRef.current) return;
     const v = videoRef.current;
     if (!v || v.readyState < 2) return;
-    // Seek to first frame for poster display
+    initRef.current = true;
     v.currentTime = Math.min(0.1, v.duration || 0.1);
     v.pause();
   }, []);
+
+  // Reset init flag when video source changes
+  useEffect(() => {
+    initRef.current = false;
+  }, [cv?.id]);
 
   const handlePlayPause = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
