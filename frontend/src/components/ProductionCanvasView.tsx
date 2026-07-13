@@ -228,13 +228,14 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
 
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState(allNodes);
 
-  // Sync external state into ReactFlow state, preserving dragged positions
+  // Sync external state into ReactFlow state, preserving dragged positions.
+  // Force new data reference so React Flow re-renders nodes on state changes.
   React.useEffect(() => {
     setRfNodes(prev => {
       const prevMap = new Map(prev.map(n => [n.id, n]));
       return allNodes.map(n => {
         const existing = prevMap.get(n.id);
-        if (existing) return { ...n, position: existing.position };
+        if (existing) return { ...n, position: existing.position, data: { ...n.data } };
         return n;
       });
     });
