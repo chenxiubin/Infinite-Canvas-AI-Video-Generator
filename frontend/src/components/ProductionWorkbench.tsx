@@ -232,11 +232,6 @@ export const ProductionWorkbench: React.FC = () => {
       })
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Log node state changes for debugging nodeId binding
-  useEffect(() => {
-    console.log('INSTANCE_NODES', { instanceId: instance?.instance_id, nodesCount: nodes.length, nodes: nodes.map(n => ({ node_id: n.node_id, shot_key: n.shot_key, status: n.status })) });
-  }, [instance, nodes]);
-
   // Auto-bootstrap: if no deep-link and no instance loaded, try to load or create a batch
   // Ensures canvas shot nodes always have a backend node_id
   const bootstrapRef = useRef(false);
@@ -404,8 +399,7 @@ export const ProductionWorkbench: React.FC = () => {
     } catch (e: any) { setError(e?.message || '绑定失败'); }
   };
   const handleGenerateSingleShot = async (nodeId: string, shotKey: string) => {
-    console.log('HANDLE_GENERATE_ENTRY', { nodeId, shotKey, provider: userModelSettings.provider, model: userModelSettings.selectedVideoModelId, hasApiKey: !!userModelSettings.apimartApiKey });
-    if (!nodeId) { console.log('HANDLE_GENERATE_RETURN: nodeId is empty'); return; }
+    if (!nodeId) return;
     const config = (storyboardConfigs || {})[shotKey] || getDefaultStoryboardConfig(shotKey, productLine, motionShotVersion);
     const prompt = buildFinalPrompt(config);
     const refs = (shotReferences || {})[shotKey] || [];
@@ -458,11 +452,9 @@ export const ProductionWorkbench: React.FC = () => {
     // ── APIMart path ──
     // Guard: prevent duplicate concurrent generation for the same shot
     if (generatingShotKeys.includes(shotKey)) {
-      console.log('HANDLE_GENERATE_RETURN: shot already generating', { shotKey });
       return;
     }
     if (!userModelSettings.apimartApiKey) {
-      console.log('HANDLE_GENERATE_RETURN: apimartApiKey is empty');
       const msg = '请先在模型设置中填写 APIMart API Key。';
       setError(msg);
       setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, status: 'failed', errorMessage: msg, updatedAt: Date.now() } }));
@@ -479,7 +471,6 @@ export const ProductionWorkbench: React.FC = () => {
 
     // Guard: model must be non-empty for APIMart generation
     if (!modelInfo) {
-      console.log('HANDLE_GENERATE_RETURN: modelInfo is empty');
       const msg = '请先在模型设置中选择 APIMart 模型。';
       setError(msg);
       setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, status: 'failed', errorMessage: msg, updatedAt: Date.now() } }));
@@ -757,6 +748,8 @@ export const ProductionWorkbench: React.FC = () => {
 
   // 10I: Add video to library and set as current (functional setState to avoid stale closure)
   const addVideoToLibrary = useCallback((shotKey: string, shotTitle: string, videoUrl: string, source: 'single-generate'|'apimart-generate'|'history-restore', reviewStatus: 'pending'|'approved' = 'pending', provider?: 'mock' | 'apimart', model?: string) => {
+    // Defensive: reject non-string or empty video URLs
+    if (typeof videoUrl !== 'string' || !videoUrl) { console.warn('addVideoToLibrary: invalid videoUrl', typeof videoUrl); return; }
     const versionId = `vid_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
     setVideoAssetsByShot(prev => {
       const nextVersions = [...(prev[shotKey] || []), {

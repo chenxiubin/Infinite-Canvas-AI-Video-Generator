@@ -87,7 +87,7 @@ export const ShotControlNode: React.FC<Props> = ({ data }) => {
         <button
           data-testid={`shot-control-generate-${sk}`}
           disabled={disabled || generating}
-          onClick={(e) => { e.stopPropagation(); console.log('SHOT_GENERATE_CLICK', { nodeId, shotKey: sk, disabled, generating }); data.onGenerate?.(nodeId, sk); }}
+          onClick={(e) => { e.stopPropagation(); data.onGenerate?.(nodeId, sk); }}
           className="text-[8px] bg-purple-600/50 hover:bg-purple-600/70 text-purple-200 rounded px-2 py-0.5 flex items-center gap-0.5 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           title={disabled ? disabledReason : '生成'}
         >

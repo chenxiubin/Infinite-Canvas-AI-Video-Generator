@@ -153,9 +153,11 @@ export function normalizeApimartTaskStatus(rawStatus: string): UnifiedGeneration
 
 export function normalizeApimartVideoUrl(result: any): string {
   if (!result) return '';
-  const url = result.video_url || result.video?.url || result.video || result.url || result.videos?.[0]?.url || '';
+  let url: any = result.video_url || result.video?.url || result.video || result.url || result.videos?.[0]?.url || '';
   // Handle array-wrapped URLs (APIMart returns videos[0].url as string[])
-  return Array.isArray(url) ? (url[0] || '') : url;
+  if (Array.isArray(url)) url = url[0] || '';
+  // Defensive: ensure return is always a string
+  return typeof url === 'string' ? url : String(url || '');
 }
 
 // ── Poll Loop ──

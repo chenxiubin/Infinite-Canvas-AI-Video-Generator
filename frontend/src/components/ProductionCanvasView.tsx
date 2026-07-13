@@ -133,12 +133,11 @@ export const ProductionCanvasView: React.FC<Props> = ({ instance, nodes, onRefre
           const binding = (shotBindings || []).find(b => b.shotKey === sk);
           const hasStartFrame = !!binding?.startFrameAssetId;
           const nodeId = nodeItem?.node_id || '';
-          console.log('SHOT_NODE_DEBUG', { shotKey: sk, nodeId, hasNodeItem: !!nodeItem, nodesCount: nodes.length, allShotKeys: nodes.map(nn => nn.shot_key) });
           const disabledReason = !nodeId ? '请先生成批次' : !hasStartFrame ? '缺少首帧' : '';
           n.data = {
             ...n.data,
             onSelectShot: (skSel: string) => { const node = nodes.find(nn => nn.shot_key === skSel); if (node) onSelectNode?.(node); else onSelectNode?.({ shot_key: skSel, shot_name: skSel, status: 'pending' } as any); },
-            onGenerate: (nid: string, shotKey: string) => { console.log('CANVAS_ON_GENERATE', { nodeId: nid, shotKey }); onGenerateSingleShot?.(nid, shotKey); },
+            onGenerate: (nid: string, shotKey: string) => onGenerateSingleShot?.(nid, shotKey),
             nodeId,
             hasStartFrame: true, // 10I: always allow mock generate, no startFrame gating
             disabledReason: !nodeId ? '请先生成批次' : '',
