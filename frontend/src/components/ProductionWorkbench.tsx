@@ -404,7 +404,8 @@ export const ProductionWorkbench: React.FC = () => {
     } catch (e: any) { setError(e?.message || '绑定失败'); }
   };
   const handleGenerateSingleShot = async (nodeId: string, shotKey: string) => {
-    if (!nodeId) return;
+    console.log('HANDLE_GENERATE_ENTRY', { nodeId, shotKey, provider: userModelSettings.provider, model: userModelSettings.selectedVideoModelId, hasApiKey: !!userModelSettings.apimartApiKey });
+    if (!nodeId) { console.log('HANDLE_GENERATE_RETURN: nodeId is empty'); return; }
     const config = (storyboardConfigs || {})[shotKey] || getDefaultStoryboardConfig(shotKey, productLine, motionShotVersion);
     const prompt = buildFinalPrompt(config);
     const refs = (shotReferences || {})[shotKey] || [];
@@ -455,7 +456,13 @@ export const ProductionWorkbench: React.FC = () => {
     }
 
     // ── APIMart path ──
+    // Guard: prevent duplicate concurrent generation for the same shot
+    if (generatingShotKeys.includes(shotKey)) {
+      console.log('HANDLE_GENERATE_RETURN: shot already generating', { shotKey });
+      return;
+    }
     if (!userModelSettings.apimartApiKey) {
+      console.log('HANDLE_GENERATE_RETURN: apimartApiKey is empty');
       const msg = '请先在模型设置中填写 APIMart API Key。';
       setError(msg);
       setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, status: 'failed', errorMessage: msg, updatedAt: Date.now() } }));
@@ -472,6 +479,7 @@ export const ProductionWorkbench: React.FC = () => {
 
     // Guard: model must be non-empty for APIMart generation
     if (!modelInfo) {
+      console.log('HANDLE_GENERATE_RETURN: modelInfo is empty');
       const msg = '请先在模型设置中选择 APIMart 模型。';
       setError(msg);
       setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, status: 'failed', errorMessage: msg, updatedAt: Date.now() } }));
@@ -488,7 +496,12 @@ export const ProductionWorkbench: React.FC = () => {
       referenceCount: reference_images.length,
     });
 
+    // Lock generating state — button shows "生成中..." and is disabled
+    setGeneratingShotKeys(prev => prev.includes(shotKey) ? prev : [...prev, shotKey]);
+    console.log('APIMART_GENERATION_START', { shotKey, model: modelInfo.id, provider: 'apimart' });
+
     const runApimartGeneration = async () => {
+      let genTaskId = '';
       try {
         // Phase 1: Upload reference images (with remoteUrl cache)
         setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, status: 'uploading', progress: 0, updatedAt: Date.now() } }));
@@ -526,14 +539,14 @@ export const ProductionWorkbench: React.FC = () => {
           userModelSettings.defaultVideoAudio, uploadedImages,
         );
         setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, status: 'queued', progress: 0, warningMessages: warnings, updatedAt: Date.now() } }));
-        const taskId = await submitApimartVideoGeneration(apiKey, baseUrl, apimartReq);
+        genTaskId = await submitApimartVideoGeneration(apiKey, baseUrl, apimartReq);
 
         // Phase 3: Poll (returns final task, no extra request)
         const shotName = (shotReferences || {})[shotKey]?.[0]?.shot_name || shotKey;
-        const finalTask = await pollApimartTask(apiKey, baseUrl, taskId, (task) => {
+        const finalTask = await pollApimartTask(apiKey, baseUrl, genTaskId, (task) => {
           setVideoGenerationTasks(prev => ({
             ...prev,
-            [shotKey]: { ...initTask, taskId, status: task.status, progress: task.progress, errorMessage: task.errorMessage, warningMessages: warnings, updatedAt: Date.now() },
+            [shotKey]: { ...initTask, taskId: genTaskId, status: task.status, progress: task.progress, errorMessage: task.errorMessage, warningMessages: warnings, updatedAt: Date.now() },
           }));
         });
 
@@ -541,14 +554,17 @@ export const ProductionWorkbench: React.FC = () => {
           addVideoToLibrary(shotKey, shotName, finalTask.videoUrl, 'apimart-generate', 'pending', 'apimart', userModelSettings.selectedVideoModelId);
           // 11E-1: Persist to backend
           persistVideoToBackend(instanceId, shotKey, finalTask.videoUrl, 'apimart');
-          setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, taskId, status: 'success', progress: 100, warningMessages: warnings, updatedAt: Date.now() } }));
+          setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, taskId: genTaskId, status: 'success', progress: 100, warningMessages: warnings, updatedAt: Date.now() } }));
         } else {
-          setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, taskId, status: 'failed', progress: 0, errorMessage: finalTask.errorMessage || '生成失败', warningMessages: warnings, updatedAt: Date.now() } }));
+          setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, taskId: genTaskId, status: 'failed', progress: 0, errorMessage: finalTask.errorMessage || '生成失败', warningMessages: warnings, updatedAt: Date.now() } }));
         }
       } catch (e: any) {
         const errMsg = sanitizeError(e?.message || '');
         setError(errMsg);
         setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, status: 'failed', errorMessage: errMsg, updatedAt: Date.now() } }));
+      } finally {
+        setGeneratingShotKeys(prev => prev.filter(k => k !== shotKey));
+        console.log('APIMART_GENERATION_FINISH', { shotKey, status: genTaskId ? 'done' : 'failed', taskId: genTaskId || 'none' });
       }
     };
     // Fire and forget (poll loop handles async)
@@ -556,6 +572,7 @@ export const ProductionWorkbench: React.FC = () => {
       const errMsg = sanitizeError(e?.message || '生成失败');
       setError(errMsg);
       setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, status: 'failed', errorMessage: errMsg, updatedAt: Date.now() } }));
+      setGeneratingShotKeys(prev => prev.filter(k => k !== shotKey));
     });
   };
   const handleReviewAction = (shotKey: string, action: string, reason?: string) => {
