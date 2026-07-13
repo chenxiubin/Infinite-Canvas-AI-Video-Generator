@@ -180,7 +180,38 @@ export const ProductionWorkbench: React.FC = () => {
 
   const showError = (e: any) => setError(e?.message || String(e)); const clearError = () => setError('');
   const addLog = (msg: string) => setDemoLog(prev => [...prev, msg]);
-  const loadInstance = useCallback(async (iid: string) => { const inst = await api.getVideoInstance(iid); setInstance(inst); setNodes(inst.nodes || []); }, []);
+  const loadInstance = useCallback(async (iid: string) => { const inst = await api.getVideoInstance(iid); setInstance(inst); setNodes(inst.nodes || []); return inst; }, []);
+  // 11E-2: Hydrate video assets from backend after loading an instance
+  const hydrateVideoLibrary = useCallback(async (iid: string, shotKeys: string[]) => {
+    const byShot: Record<string, VideoAssetVersion[]> = {};
+    const currentByShot: Record<string, string> = {};
+    for (const sk of shotKeys) {
+      try {
+        const data = await fetch(`/api/v1/video-assets/${iid}/${sk}`).then(r => r.json());
+        const versions: VideoAssetVersion[] = (data.versions || []).map((v: any) => ({
+          id: v.id,
+          shotKey: v.shot_key || sk,
+          shotTitle: sk,
+          productLine: productLine,
+          videoUrl: v.video_url || '',
+          createdAt: (v.created_at || 0) * 1000,
+          versionLabel: v.version_label || `v${v.version_number || 1}`,
+          reviewStatus: (v.review_status || v.status || 'pending') as VideoAssetVersion['reviewStatus'],
+          source: (v.provider === 'apimart' ? 'apimart-generate' : 'single-generate') as VideoAssetVersion['source'],
+          provider: v.provider || undefined,
+          model: v.model || undefined,
+        }));
+        if (versions.length > 0) {
+          byShot[sk] = versions;
+          currentByShot[sk] = versions[versions.length - 1].id;
+        }
+      } catch { /* shot may have no assets yet */ }
+    }
+    if (Object.keys(byShot).length > 0) {
+      setVideoAssetsByShot(prev => ({ ...byShot, ...prev }));
+      setCurrentVideoByShot(prev => ({ ...currentByShot, ...prev }));
+    }
+  }, [productLine]);
   const refreshAll = async () => { if (instanceRef.current) { const i = await api.getVideoInstance(instanceRef.current.instance_id); setInstance(i); setNodes(i.nodes || []); } };
   const handleSelectNode = useCallback((n: any) => { setSelectedNodeId(n?.node_id || n?.shot_key || null); }, []);
 
@@ -194,8 +225,11 @@ export const ProductionWorkbench: React.FC = () => {
     if (!iid) return;
     setLoading('加载工作实例...');
     loadInstance(iid)
-      .then(() => setLoading(''))
-      .catch((e) => { setError('无法加载指定实例: ' + (e?.message || '未知错误')); setLoading(''); });
+      .then(async (inst) => {
+        const shotKeys = (inst.nodes || []).map((n: any) => n.shot_key).filter(Boolean);
+        await hydrateVideoLibrary(iid, shotKeys);
+        setLoading('');
+      })
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Log node state changes for debugging nodeId binding
