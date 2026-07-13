@@ -553,7 +553,12 @@ export const ProductionWorkbench: React.FC = () => {
         }
       } catch (e: any) {
         const isTaskErr = e instanceof ApimartTaskError;
-        const errMsg = isTaskErr ? e.message : sanitizeError(e?.message || '');
+        let errMsg: string;
+        if (isTaskErr && e.code === 'PUBLIC_ERROR_AUDIO_FILTERED' && !userModelSettings.defaultVideoAudio) {
+          errMsg = '视频生成失败：已关闭音频但模型仍触发音频安全过滤。请更换不支持音频的模型（如 veo3 / sora-2 / kling-2-6）后重试。';
+        } else {
+          errMsg = isTaskErr ? e.message : sanitizeError(e?.message || '');
+        }
         setError(errMsg);
         setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, status: 'failed', errorMessage: errMsg, updatedAt: Date.now() } }));
       } finally {

@@ -71,7 +71,7 @@ export class ApimartTaskError extends Error {
 }
 
 const ERROR_CODE_CN: Record<string, string> = {
-  PUBLIC_ERROR_AUDIO_FILTERED: '生成音频被平台安全过滤。请关闭音频、更换模型或调整提示词后重试。',
+  PUBLIC_ERROR_AUDIO_FILTERED: '视频生成失败：音频内容被平台安全过滤。请关闭音频、更换支持无音频生成的模型（如 veo3 / sora-2 / kling-2-6）后重试。',
   PUBLIC_ERROR_CONTENT_FILTERED: '生成内容被平台安全过滤。请调整提示词后重试。',
   PUBLIC_ERROR_IMAGE_FILTERED: '参考图被平台安全过滤。请更换参考图后重试。',
   PUBLIC_ERROR_TIMEOUT: '视频生成超时。请稍后重试。',
