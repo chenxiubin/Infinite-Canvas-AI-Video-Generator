@@ -413,6 +413,9 @@ export const WorkflowSidebar: React.FC<Props> = (p) => {
     </div>
   );
 
+  const SHOT_NAMES_DESK: Record<string,string> = {S01_main:'主图-正面',S02_detail1:'细节特写-材质',S03_detail2:'细节特写-结构',S04_motion:'运镜展示',S05_scene:'场景陈列',S06_brand:'收尾-品牌'};
+  const SHOT_NAMES_WALL: Record<string,string> = {W01_main:'挂历-正面展示',W02_hanging:'上墙悬挂展示',W03_detail1:'纸张与印刷细节',W04_detail2:'装订与挂孔结构',W05_scene:'家居/办公墙面场景',W06_size:'尺寸与空间比例',W07_brand:'收尾-品牌'};
+
   const renderDirectorDesk = () => {
     const isDesk = (p.productLine || 'desk_calendar') === 'desk_calendar';
     const shotNames = isDesk ? SHOT_NAMES_DESK : SHOT_NAMES_WALL;
