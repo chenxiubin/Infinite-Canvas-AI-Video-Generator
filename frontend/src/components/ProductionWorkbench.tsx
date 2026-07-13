@@ -14,7 +14,7 @@ import { type UserModelSettings } from '../types/modelSettings';
 import { loadUserModelSettings, saveUserModelSettings } from '../lib/userModelSettingsStore';
 import { getBuiltinVideoModels, findModelById } from '../lib/apimartClient';
 import { uploadImageToApimart, submitApimartVideoGeneration, pollApimartTask, buildApimartVideoRequest, sanitizeError, ApimartTaskError, type VideoGenerationTaskState, type ApimartUploadedImage } from '../lib/apimartGenerationClient';
-import { validateApimartVideoRequest, isVeo3Lite } from '../lib/modelAdapter';
+// modelAdapter imported for family-aware validation (used in buildApimartVideoRequest)
 // import removed: compositionOrder now uses store via prop chain (11A-Fix cleanup)
 
 type NodeStatus = 'pending' | 'running' | 'success' | 'failed';
@@ -487,23 +487,6 @@ export const ProductionWorkbench: React.FC = () => {
       audio: userModelSettings.defaultVideoAudio,
       referenceCount: reference_images.length,
     });
-
-    // ── Pre-generation validation (only block for hard errors, auto-correct for soft ones) ──
-    const validation = validateApimartVideoRequest(
-      modelInfo.id,
-      userModelSettings.defaultVideoDuration,
-      userModelSettings.defaultAspectRatio,
-      userModelSettings.defaultVideoResolution,
-      userModelSettings.defaultVideoAudio,
-      reference_images.length,
-    );
-    const hardErrors = validation.errors.filter(e => !e.includes('已自动调整') && !e.includes('已自动关闭'));
-    if (hardErrors.length > 0) {
-      const msg = hardErrors.join(' ');
-      setError(msg);
-      setVideoGenerationTasks(prev => ({ ...prev, [shotKey]: { ...initTask, status: 'failed', errorMessage: msg, updatedAt: Date.now() } }));
-      return;
-    }
 
     // Lock generating state — button shows "生成中..." and is disabled
     setGeneratingShotKeys(prev => prev.includes(shotKey) ? prev : [...prev, shotKey]);
