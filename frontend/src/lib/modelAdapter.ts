@@ -205,6 +205,7 @@ export function validateApimartVideoRequest(
 export interface ModelSpecificRequest {
   body: Record<string, any>;
   warnings: string[];
+  blocked?: boolean;
 }
 
 export function buildModelSpecificRequest(
@@ -221,7 +222,7 @@ export function buildModelSpecificRequest(
   const cap = getFamilyCapability(modelId);
 
   if (family === 'unsupported') {
-    return { body: { model: modelId, prompt }, warnings: ['该模型尚未适配，仅发送最小请求。'] };
+    return { body: { model: modelId, prompt }, warnings: ['该模型尚未适配，不能用于分镜生成。'], blocked: true };
   }
 
   const body: Record<string, any> = {

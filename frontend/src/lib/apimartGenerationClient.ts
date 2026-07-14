@@ -284,10 +284,10 @@ export function buildApimartVideoRequest(
   resolution: string,
   audio: boolean,
   uploadedImages: ApimartUploadedImage[],
-): { request: ApimartVideoGenerationRequest; warnings: string[] } {
+): { request: ApimartVideoGenerationRequest; warnings: string[]; blocked?: boolean } {
   const modelId = modelInfo?.id || '';
 
-  // Use model-specific adapter for known families (doubao-2.0 needs generate_audio + size)
+  // Route through adapter for families needing non-standard format
   const family = detectFamily(modelId);
   if (family === 'doubao-2.0') {
     const refPayload = buildApimartReferencePayload(modelInfo, uploadedImages);
@@ -295,10 +295,14 @@ export function buildApimartVideoRequest(
       modelId, prompt, duration, aspectRatio, resolution, audio,
       refPayload.image_urls || [], refPayload.image_with_roles,
     );
-    return { request: result.body as any, warnings: [...refPayload.warnings, ...result.warnings] };
+    return {
+      request: result.body as any,
+      warnings: [...refPayload.warnings, ...result.warnings],
+      blocked: result.blocked,
+    };
   }
 
-  // Standard format for all other models (doubao-1.5, veo3, etc.)
+  // Standard format for doubao-1.5, veo3, wan2.6, etc.
   const { image_urls, image_with_roles, warnings } = buildApimartReferencePayload(modelInfo, uploadedImages);
   const request: ApimartVideoGenerationRequest = {
     model: modelId,
